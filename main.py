@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 
 import asyncio
+import aiohttp
 import os
 from configparser import ConfigParser
 
 from tellypatty import TellyPatty
+from alphaseek import AlphaSeek
 
 
 CREDENTIALS_FILE = "credentials.ini"
@@ -13,7 +15,14 @@ CREDENTIALS_FILE = "credentials.ini"
 async def main(credentials):
     error_count = 0
     keep_alive = True
-    async with TellyPatty(**credentials["telegram"]) as patty:
+
+    async with aiohttp.ClientSession() as session:
+
+        patty = TellyPatty(**credentials["telegram"], use_session=session)
+        alpha = AlphaSeek(**credentials["yahoofinance"], use_session=session)
+        data = await alpha.get_realtime_prices(["F", "ADMA", "da", "nu"])
+        print(data)
+
         while keep_alive:
             try:
                 data = await patty.get_updates()
@@ -36,6 +45,8 @@ async def main(credentials):
                     print("Too many errors occured, stopping...")
                     keep_alive = False
 
+    patty.save_internals()
+
 
 def read_credentials():
     ini_file = ConfigParser()
@@ -55,6 +66,7 @@ def read_credentials():
         credentials[section] = dict(ini_file[section])
 
     return credentials
+
 
 if __name__ == "__main__":
 

@@ -1,18 +1,15 @@
 import os
 import pickle
-import aiohttp
-from collections import deque
+from aiohttp import ClientSession
 
 
 class TellyPatty:
     PRIVATE_CACHE = "internals.dat"
 
-    def __init__(self, token, chat_id):
+    def __init__(self, token, chat_id, use_session: ClientSession):
         self.token = token
         self.chat_id = int(chat_id)
-
-        self.session = None
-
+        self.session = use_session
         self.load_internals()
 
     def load_internals(self):
@@ -31,17 +28,6 @@ class TellyPatty:
         with open(self.PRIVATE_CACHE, "wb") as datafile:
             pickle.dump(internals, datafile)
 
-    async def __aenter__(self):
-        self.session = aiohttp.ClientSession()
-        return self
-
-    async def __aexit__(self, exc_type, exc_value, traceback):
-        if exc_type:
-            print("Something bad happened", exc_type, exc_value)
-
-        self.save_internals()
-        await self.session.close()
-
     async def get_updates(self):
         url = (
             "https://api.telegram.org/bot{token}/getUpdates?"
@@ -54,9 +40,7 @@ class TellyPatty:
         assert self.session, "Cannot make any request without a session"
         async with self.session.get(url) as response:
             response_data = await response.json()
-            assert response_data[
-                "ok"
-            ], f"Call to getUpdates failed with {response_data['error_code']}, {response_data['description']}"
+            assert response_data.get("ok"), f"Call to getUpdates failed with {response_data['error_code']}, {response_data['description']}"
 
         return response_data["result"]
 
