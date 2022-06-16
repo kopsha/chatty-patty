@@ -1,46 +1,24 @@
-import configparser
 import os
 import pickle
 import aiohttp
-import asyncio
 from collections import deque
 
 
 class TellyPatty:
-    CREDENTIALS_CACHE = "credentials.ini"
-    INTERNAL_CACHE = "internals.dat"
+    PRIVATE_CACHE = "internals.dat"
 
-    def __init__(self):
+    def __init__(self, token, chat_id):
+        self.token = token
+        self.chat_id = int(chat_id)
+
         self.session = None
-        self.keep_alive = True
-        self.cmd_queue = deque()
-        self.watchlist = set()
 
-        self.read_credentials()
         self.load_internals()
-
-    def read_credentials(self):
-        """questionable coupling with config"""
-
-        credentials = configparser.ConfigParser()
-        if os.path.isfile(self.CREDENTIALS_CACHE):
-            credentials.read(self.CREDENTIALS_CACHE)
-        else:
-            empty = dict(token="", chat_id="")
-            with open(self.CREDENTIALS_CACHE, "wt") as storage:
-                credentials["telegram"] = empty
-                credentials.write(storage)
-            raise RuntimeError(
-                f"Created empty {self.CREDENTIALS_CACHE}, please fill in and run again."
-            )
-
-        self.token = credentials["telegram"]["token"]
-        self.chat_id = int(credentials["telegram"]["chat_id"])
 
     def load_internals(self):
         """for now, just last_update_id"""
-        if os.path.isfile(self.INTERNAL_CACHE):
-            with open(self.INTERNAL_CACHE, "rb") as datafile:
+        if os.path.isfile(self.PRIVATE_CACHE):
+            with open(self.PRIVATE_CACHE, "rb") as datafile:
                 internals = pickle.load(datafile)
         else:
             internals = dict()
@@ -50,7 +28,7 @@ class TellyPatty:
     def save_internals(self):
         """for now, just last_update_id"""
         internals = dict(last_update_id=self.last_update_id)
-        with open(self.INTERNAL_CACHE, "wb") as datafile:
+        with open(self.PRIVATE_CACHE, "wb") as datafile:
             pickle.dump(internals, datafile)
 
     async def __aenter__(self):
@@ -101,7 +79,7 @@ class TellyPatty:
         return response_data
 
     def digest_updates(self, data):
-        replies = list()
+        commands = list()
         for update in data:
             self.last_update_id = update["update_id"]
 
@@ -110,34 +88,16 @@ class TellyPatty:
             chat_id = update["message"]["chat"]["id"]
 
             if chat_id == self.chat_id:
-                reply = self.parse_command(message)
-                if reply:
-                    replies.append(asyncio.create_task(self.say(reply)))
+                commands.append(self.parse_command(message))
 
-        return replies
+        return commands
 
     def parse_command(self, message):
-        reply_message = None
-        cmd, *params = message.split()
+        first, *params = message.split()
 
-        if cmd == "/bye":
-            self.keep_alive = False
-        elif cmd == "/show":
-            print("watchlist", self.watchlist)
-            reply_message = ", ".join(sorted(self.watchlist)) or "Empty"
-        elif cmd == "/tail":
-            if params:
-                print("following", params)
-                self.watchlist.update(params)
-            else:
-                reply_message = "Nothing to follow."
-        elif cmd == "/drop":
-            if params:
-                print("dropping", params)
-                self.watchlist.difference_update(params)
-            else:
-                reply_message = "Nothing to drop."
+        if first in {"/bye", "/show", "/tail", "/drop"}:
+            command = first[1:], params
         else:
-            reply_message = f"I don't understand {cmd}"
+            command = "error", (f"I don't understand {first}",)
 
-        return reply_message
+        return command
