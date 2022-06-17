@@ -70,3 +70,6 @@ class AlphaSeek:
 
     def cmd_bye(self, params):
         self.keep_alive = False
+
+    def fake_refresh(self):
+        print("\n *** faking refresh *** \n", flush=True)

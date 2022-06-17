@@ -55,15 +55,31 @@ class Seeker:
         self.alpha.run_commands(commands)
         # TODO: maybe give some feedback on commands
 
+    async def fake_it(self):
+        print("/working...", flush=True)
+        time.sleep(0.5)
+        self.alpha.fake_refresh()
+
     async def start(self):
         error_count = 0
 
         await self.start_session()
-        # schedule.every(15).seconds.do(self.patty_updates)
+        schedule.every().minute.do(self.fake_it)
+
+        patty_task = asyncio.create_task(self.patty_updates())
+        scheduler_task = asyncio.create_task(schedule.run_pending())
+        tasks = [patty_task, scheduler_task]
 
         while self.alpha.keep_alive:
             try:
-                await self.patty_updates()
+                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+
+                for x in done:
+                    print(x, x is patty_task, x is scheduler_task)
+
+                break
+
+
                 time.sleep(0.25)
                 error_count = 0
 
