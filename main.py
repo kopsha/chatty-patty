@@ -20,8 +20,6 @@ async def main(credentials):
 
         patty = TellyPatty(**credentials["telegram"], use_session=session)
         alpha = AlphaSeek(**credentials["yahoofinance"], use_session=session)
-        data = await alpha.get_realtime_prices(["F", "ADMA", "da", "nu"])
-        print(data)
 
         while keep_alive:
             try:
