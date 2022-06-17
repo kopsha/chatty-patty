@@ -6,10 +6,11 @@ from aiohttp import ClientSession
 class TellyPatty:
     PRIVATE_CACHE = "internals.dat"
 
-    def __init__(self, token, chat_id, use_session: ClientSession):
+    def __init__(self, token, chat_id, command_set, use_session: ClientSession):
         self.token = token
         self.chat_id = int(chat_id)
         self.session = use_session
+        self.command_set = command_set
         self.load_internals()
 
     def load_internals(self):
@@ -28,13 +29,14 @@ class TellyPatty:
         with open(self.PRIVATE_CACHE, "wb") as datafile:
             pickle.dump(internals, datafile)
 
-    async def get_updates(self):
+    async def get_updates(self, polling_window=15):
+        """Get bot update using long polling strategy"""
         url = (
             "https://api.telegram.org/bot{token}/getUpdates?"
             "timeout={timeout}&offset={offset}"
         ).format(
             token=self.token,
-            timeout=15,
+            timeout=polling_window,
             offset=self.last_update_id + 1,
         )
         assert self.session, "Cannot make any request without a session"
@@ -66,24 +68,17 @@ class TellyPatty:
 
     def digest_updates(self, data):
         commands = list()
+        errors = list()
         for update in data:
             self.last_update_id = update["update_id"]
-
-            sender = update["message"]["from"]["username"]
             message = update["message"]["text"]
             chat_id = update["message"]["chat"]["id"]
 
             if chat_id == self.chat_id:
-                commands.append(self.parse_command(message))
+                first, *params = message.split()
+                if first in self.command_set:
+                    commands.append((first[1:], params))
+                else:
+                    errors.append(first)
 
-        return commands
-
-    def parse_command(self, message):
-        first, *params = message.split()
-
-        if first in {"/bye", "/show", "/tail", "/drop"}:
-            command = first[1:], params
-        else:
-            command = "error", (f"I don't understand {first}",)
-
-        return command
+        return commands, errors

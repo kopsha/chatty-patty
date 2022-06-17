@@ -2,7 +2,9 @@
 
 import asyncio
 import aiohttp
+import aioschedule as schedule
 import os
+import time
 from configparser import ConfigParser
 
 from tellypatty import TellyPatty
@@ -12,38 +14,69 @@ from alphaseek import AlphaSeek
 CREDENTIALS_FILE = "credentials.ini"
 
 
-async def main(credentials):
-    error_count = 0
-    keep_alive = True
+class Seeker:
+    def __init__(self, credentials):
+        self.credentials = credentials
+        self.session = None
+        self.patty: TellyPatty = None
+        self.alpha: AlphaSeek = None
 
-    async with aiohttp.ClientSession() as session:
+    async def start_session(self):
+        self.session = aiohttp.ClientSession()
+        self.alpha = AlphaSeek(
+            **self.credentials["yahoofinance"], use_session=self.session
+        )
+        self.patty = TellyPatty(
+            **self.credentials["telegram"],
+            command_set=self.alpha.known_commands,
+            use_session=self.session,
+        )
+        await self.patty.say("Hey, I'm all hyped up!")
 
-        patty = TellyPatty(**credentials["telegram"], use_session=session)
-        alpha = AlphaSeek(**credentials["yahoofinance"], use_session=session)
+    async def stop_session(self):
+        await self.patty.say("Bye!")
+        self.patty = None
+        self.alpha = None
+        await self.session.close()
+        self.session = None
 
-        while keep_alive:
+    async def patty_updates(self):
+        if not (self.patty and self.alpha):
+            return
+
+        print(".", end="", flush=True)
+
+        data = await self.patty.get_updates()
+        commands, errors = self.patty.digest_updates(data)
+        if errors:
+            reply = "I don't understand {}".format(", ".join(errors))
+            await self.patty.say(reply)
+
+        self.alpha.run_commands(commands)
+        # TODO: maybe give some feedback on commands
+
+    async def start(self):
+        error_count = 0
+
+        await self.start_session()
+        # schedule.every(15).seconds.do(self.patty_updates)
+
+        while self.alpha.keep_alive:
             try:
-                data = await patty.get_updates()
-
-                commands = patty.digest_updates(data)
-
-                if commands:
-                    print(commands)
-
-                for cmd, _ in commands:
-                    if cmd == "bye":
-                        keep_alive = False
-
+                await self.patty_updates()
+                time.sleep(0.25)
                 error_count = 0
 
             except Exception as err:
+                print(err, type(err), err.__dict__)
                 print("Exception occured:", str(err))
                 error_count += 1
                 if error_count > 2:
                     print("Too many errors occured, stopping...")
-                    keep_alive = False
+                    self.alpha.keep_alive = False
 
-    patty.save_internals()
+        self.patty.save_internals()
+        await self.stop_session()
 
 
 def read_credentials():
@@ -69,7 +102,8 @@ def read_credentials():
 if __name__ == "__main__":
 
     credentials = read_credentials()
+    seeker = Seeker(credentials)
 
     print("--- starting event loop ---")
-    asyncio.run(main(credentials))
+    asyncio.run(seeker.start())
     print("---  event loop closed  ---")

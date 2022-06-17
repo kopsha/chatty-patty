@@ -1,3 +1,4 @@
+from functools import cached_property
 from aiohttp import ClientSession
 
 
@@ -11,6 +12,8 @@ class AlphaSeek:
         self.auth_headers["accept"] = "application/json"
         self.auth_headers["origin"] = "https://www.yahoofinanceapi.com"
         self.session = use_session
+        self.keep_alive = True
+        self.watchlist = set()
 
     async def get_realtime_prices(self, symbols):
         """Latest prices for given symbols"""
@@ -31,7 +34,7 @@ class AlphaSeek:
         return response_data["data"]
 
     async def get_chart_year(self, symbol):
-        """OHLC prices for the past year"""
+        """Past year OHLC prices for the given symbol"""
 
         querystring = dict(symbol=symbol, period="1Y")
         url = "{root}/symbol/get-chart".format(root=self.api_root)
@@ -47,3 +50,23 @@ class AlphaSeek:
             ), f"Call to get-chart failed with {response.reason}, {response_data['message']}"
 
         return response_data
+
+    @cached_property
+    def known_commands(self):
+        return {"/" + func[4:] for func in dir(self) if func.startswith("cmd_")}
+
+    def run_commands(self, commands):
+        for cmd, params in commands:
+            func = getattr(self, "cmd_" + cmd)
+            func(params)
+
+    def cmd_tail(self, params):
+        clean_params = filter(lambda x: x.strip().upper(), params)
+        self.watchlist.update(clean_params)
+
+    def cmd_drop(self, params):
+        clean_params = filter(lambda x: x.strip().upper(), params)
+        self.watchlist.difference_update(clean_params)
+
+    def cmd_bye(self, params):
+        self.keep_alive = False
