@@ -1,5 +1,7 @@
+import asyncio
 from functools import cached_property
 from aiohttp import ClientSession
+from datetime import datetime
 
 
 class AlphaSeek:
@@ -33,10 +35,10 @@ class AlphaSeek:
 
         return response_data["data"]
 
-    async def get_chart_year(self, symbol):
+    async def get_recent_chart(self, symbol):
         """Past year OHLC prices for the given symbol"""
 
-        querystring = dict(symbol=symbol, period="1Y")
+        querystring = dict(symbol=symbol, period="5D")
         url = "{root}/symbol/get-chart".format(root=self.api_root)
 
         assert self.session, "Cannot make any request without a session"
@@ -56,20 +58,38 @@ class AlphaSeek:
         return {"/" + func[4:] for func in dir(self) if func.startswith("cmd_")}
 
     def run_commands(self, commands):
+        replies = list()
         for cmd, params in commands:
             func = getattr(self, "cmd_" + cmd)
-            func(params)
+            reply = func(params)
+            if reply:
+                replies.append(reply)
+        return replies
 
     def cmd_tail(self, params):
-        clean_params = filter(lambda x: x.strip().upper(), params)
+        clean_params = filter(None, (p.strip().upper() for p in params))
         self.watchlist.update(clean_params)
+        print("following", self.watchlist)
 
     def cmd_drop(self, params):
-        clean_params = filter(lambda x: x.strip().upper(), params)
+        clean_params = filter(None, (p.strip().upper() for p in params))
         self.watchlist.difference_update(clean_params)
 
     def cmd_bye(self, params):
         self.keep_alive = False
 
-    def fake_refresh(self):
-        print("\n *** faking refresh *** \n", flush=True)
+    def cmd_show(self, params):
+        return "Following {}".format(", ".join(self.watchlist))
+
+    async def update_charts(self):
+        now = datetime.now()
+        print("\n *** update charts", now.isoformat(), flush=True)
+
+        if self.watchlist:
+            results = await asyncio.gather(*(self.get_recent_chart(s) for s in self.watchlist))
+            self.watchlist = list()
+            for data in results:
+                print(data["id"])
+                for k, v in data["attributes"].items():
+                    print(k, v["close"])
+

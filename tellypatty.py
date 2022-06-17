@@ -1,6 +1,9 @@
 import os
 import pickle
 from aiohttp import ClientSession
+from random import choice
+
+import aiohttp
 
 
 class TellyPatty:

@@ -16,8 +16,8 @@ CREDENTIALS_FILE = "credentials.ini"
 
 class Seeker:
     def __init__(self, credentials):
-        self.credentials = credentials
-        self.session = None
+        self.credentials: dict = credentials
+        self.session: aiohttp.ClientSession = None
         self.patty: TellyPatty = None
         self.alpha: AlphaSeek = None
 
@@ -40,47 +40,32 @@ class Seeker:
         await self.session.close()
         self.session = None
 
-    async def patty_updates(self):
+    async def update_patty(self):
         if not (self.patty and self.alpha):
             return
 
         print(".", end="", flush=True)
 
-        data = await self.patty.get_updates()
+        data = await self.patty.get_updates(polling_window=1)
         commands, errors = self.patty.digest_updates(data)
         if errors:
             reply = "I don't understand {}".format(", ".join(errors))
             await self.patty.say(reply)
 
-        self.alpha.run_commands(commands)
-        # TODO: maybe give some feedback on commands
-
-    async def fake_it(self):
-        print("/working...", flush=True)
-        time.sleep(0.5)
-        self.alpha.fake_refresh()
+        replies = self.alpha.run_commands(commands)
+        if replies:
+            await self.patty.say("\n".join(replies))
 
     async def start(self):
         error_count = 0
-
         await self.start_session()
-        schedule.every().minute.do(self.fake_it)
 
-        patty_task = asyncio.create_task(self.patty_updates())
-        scheduler_task = asyncio.create_task(schedule.run_pending())
-        tasks = [patty_task, scheduler_task]
-
+        schedule.every(10).seconds.do(self.alpha.update_charts)
         while self.alpha.keep_alive:
             try:
-                done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                await asyncio.gather(schedule.run_pending(), self.update_patty())
+                time.sleep(0.61803398875)
 
-                for x in done:
-                    print(x, x is patty_task, x is scheduler_task)
-
-                break
-
-
-                time.sleep(0.25)
                 error_count = 0
 
             except Exception as err:
