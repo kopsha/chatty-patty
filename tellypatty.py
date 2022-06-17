@@ -40,7 +40,9 @@ class TellyPatty:
         assert self.session, "Cannot make any request without a session"
         async with self.session.get(url) as response:
             response_data = await response.json()
-            assert response_data.get("ok"), f"Call to getUpdates failed with {response_data['error_code']}, {response_data['description']}"
+            assert response_data.get(
+                "ok"
+            ), f"Call to getUpdates failed with {response_data['error_code']}, {response_data['description']}"
 
         return response_data["result"]
 

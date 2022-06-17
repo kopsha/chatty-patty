@@ -3,6 +3,7 @@ from aiohttp import ClientSession
 
 class AlphaSeek:
     """Seeking Alpha wrapper from https://www.yahoofinanceapi.com/"""
+
     api_root = "https://alpha.financeapi.net"
 
     def __init__(self, api_key: str, use_session: ClientSession):
@@ -19,9 +20,13 @@ class AlphaSeek:
 
         assert self.session, "Cannot make any request without a session"
 
-        async with self.session.get(url, headers=self.auth_headers, params=querystring) as response:
+        async with self.session.get(
+            url, headers=self.auth_headers, params=querystring
+        ) as response:
             response_data = await response.json()
-            assert response.status == 200, f"Call to get-realtime-prices failed with {response.reason}, {response_data['message']}"
+            assert (
+                response.status == 200
+            ), f"Call to get-realtime-prices failed with {response.reason}, {response_data['message']}"
 
         return response_data["data"]
 
@@ -33,8 +38,12 @@ class AlphaSeek:
 
         assert self.session, "Cannot make any request without a session"
 
-        async with self.session.get(url, headers=self.auth_headers, params=querystring) as response:
+        async with self.session.get(
+            url, headers=self.auth_headers, params=querystring
+        ) as response:
             response_data = await response.json()
-            assert response.status == 200, f"Call to get-chart failed with {response.reason}, {response_data['message']}"
+            assert (
+                response.status == 200
+            ), f"Call to get-chart failed with {response.reason}, {response_data['message']}"
 
         return response_data
