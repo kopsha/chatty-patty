@@ -4,5 +4,4 @@ internals.ini
 *.dat
 *.png
 __pycache__/
-.env
-.virtualenv/
+.venv

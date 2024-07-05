@@ -3,6 +3,8 @@
 import asyncio
 import aiohttp
 import aioschedule as schedule
+import certifi
+import ssl
 import os
 import time
 from configparser import ConfigParser
@@ -22,7 +24,9 @@ class Seeker:
         self.alpha: AlphaSeek = None
 
     async def start_session(self):
-        self.session = aiohttp.ClientSession()
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+
+        self.session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context))
         self.alpha = AlphaSeek(
             **self.credentials["yahoofinance"], use_session=self.session
         )
