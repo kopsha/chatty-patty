@@ -11,7 +11,6 @@ class TellyPatty:
         self.chat_id = int(chat_id)
         self.session = use_session
         self.command_set = command_set
-        self.load_internals()
 
     def load_internals(self):
         """for now, just last_update_id"""

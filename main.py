@@ -5,6 +5,8 @@ import asyncio
 import certifi
 import os
 import ssl
+import time
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from configparser import ConfigParser
 
 from tellypatty import TellyPatty
@@ -20,11 +22,14 @@ class Seeker:
         self.session = None
         self.patty: TellyPatty = None
         self.alpha: AlphaSeek = None
+        self.last_time = None
 
     async def start_session(self):
         ssl_context = ssl.create_default_context(cafile=certifi.where())
 
-        self.session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=ssl_context))
+        self.session = aiohttp.ClientSession(
+            connector=aiohttp.TCPConnector(ssl=ssl_context)
+        )
         self.alpha = AlphaSeek(
             **self.credentials["yahoofinance"], use_session=self.session
         )
@@ -33,10 +38,14 @@ class Seeker:
             command_set=self.alpha.known_commands,
             use_session=self.session,
         )
-        await self.patty.say("Hey, I'm all hyped up!")
+        self.patty.load_internals()
+
+        await self.patty.say("Hey!")
 
     async def stop_session(self):
         await self.patty.say("Bye!")
+
+        self.save_internals()
         self.patty = None
         self.alpha = None
         await self.session.close()
@@ -57,26 +66,46 @@ class Seeker:
         self.alpha.run_commands(commands)
         # TODO: maybe give some feedback on commands
 
-    async def start(self):
+    async def fast_task(self):
+        now = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
+
+        if self.last_time:
+            delta = float(now - self.last_time) / 1_000_000
+            print(f"took {delta:,.6f} seconds")
+
+        self.last_time = now
+
+    async def slow_task(self):
         error_count = 0
-
-        await self.start_session()
-
         while self.alpha.keep_alive:
             try:
                 await self.patty_updates()
-                # await self.alpha.watch()
                 await asyncio.sleep(0.21)
 
-                error_count = 0
-
+                if error_count:
+                    error_count -= 1
             except Exception as err:
-                print(err, type(err), err.__dict__)
-                print("Exception occured:", str(err))
                 error_count += 1
+                print(err, "happened", error_count)
+
                 if error_count > 2:
-                    print("Too many errors occured, stopping...")
+                    print("Too many errors occurred, stopping...")
                     self.alpha.keep_alive = False
+
+    async def main(self):
+        await self.start_session()
+
+        scheduler = AsyncIOScheduler()
+        scheduler.add_job(self.fast_task, "interval", seconds=13)
+        scheduler.start()
+
+        task = asyncio.create_task(self.slow_task())
+        try:
+            await task
+        except (KeyboardInterrupt, SystemExit):
+            pass
+
+        scheduler.shutdown()
 
         self.patty.save_internals()
         await self.stop_session()
@@ -103,10 +132,7 @@ def read_credentials():
 
 
 if __name__ == "__main__":
-
     credentials = read_credentials()
     seeker = Seeker(credentials)
 
-    print("--- starting event loop ---")
-    asyncio.run(seeker.start())
-    print("---  event loop closed  ---")
+    asyncio.run(seeker.main())

@@ -53,11 +53,12 @@ class AlphaSeek:
         return response_data
 
     async def watch(self):
-        data = await self.get_realtime_prices(list(self.watchlist) + ["tsla"])
-        print(data)
-
-        if not self.watchlist:
-            print("nothing to watch")
+        print(self.watchlist)
+        # data = await self.get_realtime_prices(list(self.watchlist) + ["tsla"])
+        # print(data)
+        #
+        # if not self.watchlist:
+        #     print("nothing to watch")
 
     @cached_property
     def known_commands(self):
