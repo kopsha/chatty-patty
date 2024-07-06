@@ -22,7 +22,7 @@ class Seeker:
         self.session = None
         self.patty: TellyPatty = None
         self.alpha: AlphaSeek = None
-        self.last_time = None
+        self.err_count = 0
 
     async def start_session(self):
         ssl_context = ssl.create_default_context(cafile=certifi.where())
@@ -67,39 +67,38 @@ class Seeker:
         # TODO: maybe give some feedback on commands
 
     async def fast_task(self):
-        now = time.clock_gettime_ns(time.CLOCK_MONOTONIC)
-
-        if self.last_time:
-            delta = float(now - self.last_time) / 1_000_000
-            print(f"took {delta:,.6f} seconds")
-
-        self.last_time = now
+        try:
+            await self.alpha.watch()
+        except Exception as err:
+            self.err_count += 1
+            print(err, "happened", self.err_count)
 
     async def slow_task(self):
-        error_count = 0
+        try:
+            await self.patty_updates()
+
+            if self.err_count:
+                self.err_count -= 1
+        except Exception as err:
+            self.err_count += 1
+            print(err, "happened", self.err_count)
+            if self.err_count > 2:
+                print("Too many errors occurred, stopping...")
+                self.alpha.keep_alive = False
+
+    async def loop(self):
         while self.alpha.keep_alive:
-            try:
-                await self.patty_updates()
-                await asyncio.sleep(0.21)
-
-                if error_count:
-                    error_count -= 1
-            except Exception as err:
-                error_count += 1
-                print(err, "happened", error_count)
-
-                if error_count > 2:
-                    print("Too many errors occurred, stopping...")
-                    self.alpha.keep_alive = False
+            await self.slow_task()
+            await asyncio.sleep(0.21)
 
     async def main(self):
         await self.start_session()
 
         scheduler = AsyncIOScheduler()
-        scheduler.add_job(self.fast_task, "interval", seconds=13)
+        scheduler.add_job(self.fast_task, "interval", seconds=3)
         scheduler.start()
 
-        task = asyncio.create_task(self.slow_task())
+        task = asyncio.create_task(self.loop())
         try:
             await task
         except (KeyboardInterrupt, SystemExit):
@@ -107,7 +106,6 @@ class Seeker:
 
         scheduler.shutdown()
 
-        self.patty.save_internals()
         await self.stop_session()
 
 
