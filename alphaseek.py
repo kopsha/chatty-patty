@@ -18,7 +18,7 @@ class AlphaSeek:
     async def get_realtime_prices(self, symbols):
         """Latest prices for given symbols"""
 
-        querystring = dict(symbols=",".join(symbols))
+        querystring = dict(sa_slugs=",".join(symbols))
         url = "{root}/market/get-realtime-prices".format(root=self.api_root)
 
         assert self.session, "Cannot make any request without a session"
@@ -27,11 +27,12 @@ class AlphaSeek:
             url, headers=self.auth_headers, params=querystring
         ) as response:
             response_data = await response.json()
+            print(querystring)
             assert (
                 response.status == 200
             ), f"Call to get-realtime-prices failed with {response.reason}, {response_data['message']}"
 
-        return response_data["data"]
+        return response_data
 
     async def get_chart_year(self, symbol):
         """Past year OHLC prices for the given symbol"""
@@ -51,9 +52,16 @@ class AlphaSeek:
 
         return response_data
 
+    async def watch(self):
+        data = await self.get_realtime_prices(list(self.watchlist) + ["tsla"])
+        print(data)
+
+        if not self.watchlist:
+            print("nothing to watch")
+
     @cached_property
     def known_commands(self):
-        return {"/" + func[4:] for func in dir(self) if func.startswith("cmd_")}
+        return {func[4:] for func in dir(self) if func.startswith("cmd_")}
 
     def run_commands(self, commands):
         for cmd, params in commands:

@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 
-import asyncio
 import aiohttp
-import aioschedule as schedule
+import asyncio
 import certifi
-import ssl
 import os
-import time
+import ssl
 from configparser import ConfigParser
 
 from tellypatty import TellyPatty
@@ -63,12 +61,13 @@ class Seeker:
         error_count = 0
 
         await self.start_session()
-        # schedule.every(15).seconds.do(self.patty_updates)
 
         while self.alpha.keep_alive:
             try:
                 await self.patty_updates()
-                time.sleep(0.25)
+                # await self.alpha.watch()
+                await asyncio.sleep(0.21)
+
                 error_count = 0
 
             except Exception as err:

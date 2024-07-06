@@ -76,8 +76,8 @@ class TellyPatty:
 
             if chat_id == self.chat_id:
                 first, *params = message.split()
-                if first in self.command_set:
-                    commands.append((first[1:], params))
+                if (cmd := first.lower()) in self.command_set:
+                    commands.append((cmd, params))
                 else:
                     errors.append(first)
 
