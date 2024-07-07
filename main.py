@@ -10,11 +10,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from configparser import ConfigParser
 
 from tellypatty import TellyPatty
-from alphaseek import AlphaSeek
-
+from alpaca import AlpacaScavenger
 
 CREDENTIALS_FILE = "credentials.ini"
-ERR_TOLERANCE = 3
+ERR_TOLERANCE = 1
 
 
 def error_resilient(fn):
@@ -24,11 +23,10 @@ def error_resilient(fn):
             return await fn(self, *args, **kwargs)
         except Exception as err:
             self.err_count += 1
-            print("ERROR", self.err_count, "::", err)
+            print("ERROR", self.err_count, "::", repr(err))
 
-            if self.err_count > ERR_TOLERANCE:
-                print("That's too many, stopping...")
-                self.keep_running = False
+            if self.err_count >= ERR_TOLERANCE:
+                await self._stop_all_tasks()
 
     return wrapper
 
@@ -39,38 +37,47 @@ class Seeker:
         self.session = None
         self.err_count = None
         self.keep_running = None
+        self.scheduler = AsyncIOScheduler()
+
         self.patty: TellyPatty = None
-        self.alpha: AlphaSeek = None
+        self.alpaca: AlpacaScavenger = None
 
     async def on_start(self):
-        self.alpha = AlphaSeek(
-            **self.credentials["yahoofinance"], use_session=self.session
+        self.alpaca = AlpacaScavenger(
+            **self.credentials["alpaca"], use_session=self.session
         )
         self.patty = TellyPatty(
             **self.credentials["telegram"],
-            command_set=self.alpha.known_commands,
+            command_set=self.alpaca.known_commands,
             use_session=self.session,
         )
         self.patty.load_internals()
-        await self.patty.say("Hey!")
+
+        await self.alpaca.fetch_account_info()
+        await self.alpaca.fetch_market_clock()
+
+        message = "\n".join((
+            "Scavanger hunting ready:",
+            self.alpaca.as_opening_str(),
+        ))
+        await self.patty.say(message)
 
     async def on_stop(self):
         await self.patty.say("Bye!")
 
         self.patty.save_internals()
         self.patty = None
-        self.alpha = None
+        self.alpaca = None
 
     @error_resilient
     async def fast_task(self):
         print(".", end="", flush=True)
 
-        changed_symbols = await self.alpha.watch()
+        # data = await self.alpaca.fetch_quotes(symbols=["AAPL", "BITF", "MSFT"])
+        # data = await self.alpaca.fetch_orders()
+        changed_symbols = await self.alpaca.watch()
         for symbol in changed_symbols:
-            msg = "{}%0A{}".format(
-                symbol,
-                "%0A".join(AlphaSeek.pretty_q(self.alpha.quotes[symbol])),
-            )
+            msg = str(self.alpaca.quotes[symbol])
             await self.patty.say(msg)
 
     @error_resilient
@@ -83,8 +90,8 @@ class Seeker:
             reply = "I don't understand {}".format(", ".join(errors))
             await self.patty.say(reply)
 
-        self.alpha.run_commands(commands)
         # TODO: maybe give some feedback on commands
+        self.alpaca.run_commands(commands)
 
     async def _open_session(self):
         ssl_context = ssl.create_default_context(cafile=certifi.where())
@@ -107,20 +114,27 @@ class Seeker:
             await self.slow_task()
             await asyncio.sleep(0.21)
 
+    async def _stop_all_tasks(self):
+        self.keep_running = False
+        self.scheduler.shutdown()
+
+
     async def main(self):
         await self._open_session()
 
-        scheduler = AsyncIOScheduler()
-        scheduler.add_job(self.fast_task, "interval", seconds=21)
-        scheduler.start()
+        self.scheduler.add_job(self.fast_task, "interval", seconds=5)
+        self.scheduler.start()
 
+        print("starting main task")
         task = asyncio.create_task(self._loop())
         try:
             await task
         except (KeyboardInterrupt, SystemExit):
             pass
 
-        scheduler.shutdown()
+        print("stopped main task")
+        if self.scheduler.running:
+            self.scheduler.shutdown()
 
         await self._close_session()
 

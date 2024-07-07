@@ -1,5 +1,6 @@
 import os
 import pickle
+from urllib.parse import quote_plus
 from aiohttp import ClientSession
 
 
@@ -48,14 +49,18 @@ class TellyPatty:
         return response_data["result"]
 
     async def say(self, message):
-        url = (
-            "https://api.telegram.org/bot{token}/sendMessage?"
-            "chat_id={chat_id}&text={message}"
-            "&parse_mode=Markdown&disable_web_page_preview=true"
-        ).format(token=self.token, chat_id=self.chat_id, message=message)
-
-        assert self.session, "Cannot make any request without a session"
-        async with self.session.get(url) as response:
+        url = "https://api.telegram.org/bot{token}/sendMessage".format(token=self.token)
+        query = dict(
+            chat_id=self.chat_id,
+            text=message,
+            parse_mode="markdown",
+            disable_web_page_preview="true",
+        )
+        async with self.session.get(
+            url,
+            params=query,
+            raise_for_status=True,
+        ) as response:
             response_data = await response.json()
             assert response_data[
                 "ok"
