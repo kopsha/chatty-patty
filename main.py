@@ -76,8 +76,6 @@ class Seeker:
     async def fast_task(self):
         print(".", end="", flush=True)
 
-        # data = await self.alpaca.fetch_quotes(symbols=["AAPL", "BITF", "MSFT"])
-        # data = await self.alpaca.fetch_orders()
         changed_symbols = await self.alpaca.watch()
         for symbol in changed_symbols:
             msg = str(self.alpaca.quotes[symbol])
@@ -95,6 +93,11 @@ class Seeker:
 
         # TODO: maybe give some feedback on commands
         await self.alpaca.run_commands(commands)
+
+    @error_resilient
+    async def hourly(self):
+        self.alpaca.fetch_market_clock()
+        self.alpaca.fetch_most_active()
 
     async def _open_session(self):
         ssl_context = ssl.create_default_context(cafile=certifi.where())
@@ -124,7 +127,8 @@ class Seeker:
     async def main(self):
         await self._open_session()
 
-        self.scheduler.add_job(self.fast_task, "interval", seconds=5)
+        self.scheduler.add_job(self.fast_task, "interval", seconds=21)
+        self.scheduler.add_job(self.hourly, "interval", hours=1)
         self.scheduler.start()
 
         print("starting main task")

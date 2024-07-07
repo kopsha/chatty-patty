@@ -196,24 +196,6 @@ class AlpacaScavenger:
 
         self.is_market_open = response_data["is_open"]
 
-    async def fetch_quotes(self, symbols):
-        url = f"{self.API_ROOT}/v2/stocks/quotes/latest".format(group="data")
-        query = dict(feed="iex", symbols=",".join(symbols))
-
-        async with self.session.get(
-            url,
-            headers=self.auth_headers,
-            params=query,
-            raise_for_status=True,
-        ) as response:
-            response_data = await response.json()
-
-        quotes = [
-            Quote.from_alpaca(data=data, symbol=symbol)
-            for symbol, data in response_data["quotes"].items()
-        ]
-        return quotes
-
     async def fetch_orders(self):
         url = f"{self.API_ROOT}/v2/orders".format(group="api")
         query = dict(
@@ -308,6 +290,42 @@ class AlpacaScavenger:
             headers=self.auth_headers,
             raise_for_status=True,
         )
+
+    async def fetch_quotes(self, symbols):
+        url = f"{self.API_ROOT}/v2/stocks/quotes/latest".format(group="data")
+        query = dict(feed="iex", symbols=",".join(symbols))
+
+        async with self.session.get(
+            url,
+            headers=self.auth_headers,
+            params=query,
+            raise_for_status=True,
+        ) as response:
+            response_data = await response.json()
+
+        quotes = [
+            Quote.from_alpaca(data=data, symbol=symbol)
+            for symbol, data in response_data["quotes"].items()
+        ]
+        return quotes
+
+    async def fetch_most_active(self):
+        url = f"{self.API_ROOT}/v1beta1/screener/stocks/most-actives".format(group="data")
+        query = dict(top=34, by="volume")
+
+        async with self.session.get(
+            url,
+            headers=self.auth_headers,
+            params=query,
+            raise_for_status=True,
+        ) as response:
+            response_data = await response.json()
+
+        symbols = [
+            to_namespace(data).symbol
+            for data in response_data["most_actives"]
+        ]
+        return symbols
 
     async def watch(self):
         has_changed = list()
