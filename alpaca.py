@@ -33,7 +33,7 @@ class Quote:
     def __str__(self) -> str:
         return "\n".join(
             (
-                f"_{self.symbol}_:",
+                f"_{self.symbol}_",
                 f"bid: {self.bid_price:7.2f} $ (x {self.bid_size})",
                 f"ask: {self.ask_price:7.2f} $ (x {self.ask_size})",
             )
@@ -156,18 +156,20 @@ class AlpacaScavenger:
         }
         self.session = use_session
 
-        self.watchlist = set()
+        self.watchlist = SimpleNamespace(name="Hidden Multiplier", symbols=set())
         self.quotes = dict()
         self.account = None
         self.is_market_open = False
 
     def as_opening_str(self) -> str:
+        flat_watchlist = ",".join(self.watchlist.symbols) or "(empty)"
         return "\n".join(
             (
                 f"- market is open: {self.is_market_open}",
                 f"- equity: {self.account.equity:.2f} $",
                 f"- portfolio: {self.account.portfolio_value:.2f} $",
                 f"- cash: {self.account.cash:.2f} $ / {self.account.buying_power:.2f} $",
+                f"- watchlist: {flat_watchlist}",
             )
         )
 
@@ -231,21 +233,97 @@ class AlpacaScavenger:
         orders = [from_alpaca(Cls=Order, data=data) for data in response_data]
         return orders
 
+    async def setup_watchlists(self):
+        watchlist = await self.fetch_watchlist()
+        if hasattr(watchlist, "assets"):
+            print("Watchlist already exist, refreshing assets...")
+            for ass in watchlist.assets:
+                self.watchlist.symbols.add(ass.symbol)
+                self.quotes[ass.symbol] = dict()
+        else:
+            print("Watchlist does not exist, creating one...")
+            await self.create_watchlist()
+
+    async def fetch_watchlists(self):
+        url = f"{self.API_ROOT}/v2/watchlists".format(group="api")
+        async with self.session.get(
+            url,
+            headers=self.auth_headers,
+            params=dict(name=self.watchlist.name),
+            raise_for_status=True,
+        ) as response:
+            response_data = await response.json()
+        return to_namespace(response_data)
+
+    async def create_watchlist(self):
+        url = f"{self.API_ROOT}/v2/watchlists".format(group="api")
+        data = dict(name=self.watchlist.name)
+        if self.watchlist.symbols:
+            data["symbols"] = ",".join(self.watchlist.symbols)
+
+        async with self.session.post(
+            url,
+            headers=self.auth_headers,
+            raise_for_status=True,
+            json=data,
+        ) as response:
+            response_data = await response.json()
+
+        return to_namespace(response_data)
+
+    async def fetch_watchlist(self):
+        url = f"{self.API_ROOT}/v2/watchlists:by_name".format(group="api")
+        async with self.session.get(
+            url,
+            headers=self.auth_headers,
+            params=dict(name=self.watchlist.name),
+        ) as response:
+            if response.status == 200:
+                response_data = await response.json()
+            else:
+                response_data = dict()
+        return to_namespace(response_data)
+
+    async def update_watchlist(self):
+        url = f"{self.API_ROOT}/v2/watchlists:by_name".format(group="api")
+        data = dict(
+            name=self.watchlist.name,
+            symbols=list(self.watchlist.symbols),
+        )
+        async with self.session.put(
+            url,
+            headers=self.auth_headers,
+            params=dict(name=self.watchlist.name),
+            raise_for_status=True,
+            json=data,
+        ) as response:
+            response_data = await response.json()
+
+        return to_namespace(response_data)
+
+    async def delete_watchlist(self, by_id):
+        url = f"{self.API_ROOT}/v2/watchlists/{by_id}".format(group="api")
+        await self.session.delete(
+            url,
+            headers=self.auth_headers,
+            raise_for_status=True,
+        )
+
     async def watch(self):
         has_changed = list()
 
         if self.is_market_open:
-            watchlist = self.watchlist
+            watchlist = self.watchlist.symbols
         elif any(bool(x) is False for x in self.quotes.values()):
             # NOTE: market is closed but we miss some values
-            watchlist = self.watchlist
+            watchlist = self.watchlist.symbols
         else:
             watchlist = []
 
         if watchlist:
-            quotes = await self.fetch_quotes(self.watchlist)
+            quotes = await self.fetch_quotes(watchlist)
             for current in quotes:
-                previous = self.quotes[current.symbol]
+                previous = self.quotes.get(current.symbol, [])
                 if current != previous:
                     has_changed.append(current.symbol)
                     self.quotes[current.symbol] = current
@@ -256,22 +334,24 @@ class AlpacaScavenger:
     def known_commands(self):
         return {func[4:] for func in dir(self) if func.startswith("cmd_")}
 
-    def run_commands(self, commands):
+    async def run_commands(self, commands):
         for cmd, params in commands:
             func = getattr(self, "cmd_" + cmd)
-            func(params)
+            await func(params)
 
-    def cmd_tail(self, params):
+    async def cmd_tail(self, params):
         clean_params = set(map(str.upper, params))
-        self.watchlist.update(clean_params)
+        self.watchlist.symbols.update(clean_params)
         for symbol in clean_params:
             self.quotes[symbol] = None
+        await self.update_watchlist()
 
-    def cmd_drop(self, params):
+    async def cmd_drop(self, params):
         clean_params = filter(lambda x: x.strip().upper(), params)
-        self.watchlist.difference_update(clean_params)
+        self.watchlist.symbols.difference_update(clean_params)
         for symbol in clean_params:
             self.quotes.pop(symbol)
+        await self.update_watchlist()
 
 
 if __name__ == "__main__":

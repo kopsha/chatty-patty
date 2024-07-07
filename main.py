@@ -55,11 +55,14 @@ class Seeker:
 
         await self.alpaca.fetch_account_info()
         await self.alpaca.fetch_market_clock()
+        await self.alpaca.setup_watchlists()
 
-        message = "\n".join((
-            "Scavanger hunting ready:",
-            self.alpaca.as_opening_str(),
-        ))
+        message = "\n".join(
+            (
+                "Scavanger hunting ready:",
+                self.alpaca.as_opening_str(),
+            )
+        )
         await self.patty.say(message)
 
     async def on_stop(self):
@@ -91,7 +94,7 @@ class Seeker:
             await self.patty.say(reply)
 
         # TODO: maybe give some feedback on commands
-        self.alpaca.run_commands(commands)
+        await self.alpaca.run_commands(commands)
 
     async def _open_session(self):
         ssl_context = ssl.create_default_context(cafile=certifi.where())
@@ -117,7 +120,6 @@ class Seeker:
     async def _stop_all_tasks(self):
         self.keep_running = False
         self.scheduler.shutdown()
-
 
     async def main(self):
         await self._open_session()
