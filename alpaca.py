@@ -347,11 +347,15 @@ class AlpacaScavenger:
         await self.update_watchlist()
 
     async def cmd_drop(self, params):
-        clean_params = filter(lambda x: x.strip().upper(), params)
+        clean_params = set(map(str.upper, params))
         self.watchlist.symbols.difference_update(clean_params)
         for symbol in clean_params:
             self.quotes.pop(symbol)
         await self.update_watchlist()
+
+    async def cmd_reload(self, params):
+        for sym in self.watchlist.symbols:
+            self.quotes[sym] = dict()
 
 
 if __name__ == "__main__":
