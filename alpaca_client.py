@@ -29,12 +29,12 @@ class AlpacaClient:
     async def fetch_account_info(self):
         api_url = self.API_ROOT.format(group="api", method="v2/account")
         response = await self.client.get(api_url)
-        self.account = Account.from_alpaca(response)
+        return Account.from_alpaca(response)
 
     async def fetch_market_clock(self):
         api_url = self.API_ROOT.format(group="api", method="v2/clock")
         response = await self.client.get(api_url)
-        self.is_market_open = response.is_open
+        return response
 
     async def fetch_orders(self):
         api_url = self.API_ROOT.format(group="api", method="v2/orders")
@@ -47,32 +47,31 @@ class AlpacaClient:
         orders = [from_alpaca(Cls=Order, data=data) for data in response]
         return orders
 
-    async def fetch_watchlist(self, named: str):
-        api_url = self.API_ROOT.format(group="api", method="v2/watchlists")
-        query = dict(name=named)
-        response = await self.client.get(api_url, params=query)
-        return response
-
     async def find_watchlist(self, named: str):
+        api_url = self.API_ROOT.format(group="api", method="v2/watchlists")
+        response = await self.client.get(api_url)
+        result = next(filter(lambda x: x.name == named, response), None)
+        return result
+
+    async def fetch_watchlist(self, named: str):
         api_url = self.API_ROOT.format(group="api", method="v2/watchlists:by_name")
         query = dict(name=named)
         response = await self.client.get(api_url, params=query)
         return response
 
-    async def create_watchlist(self, named: str, symbols: list[str]):
+    async def create_watchlist(self, named: str, symbols: list[str] = []):
         api_url = self.API_ROOT.format(group="api", method="v2/watchlists")
-        query = dict(name=named)
+        data = dict(name=named)
         if symbols:
-            query["symbols"] = ",".join(symbols)
-        response = await self.client.post(api_url, params=query)
+            data["symbols"] = ",".join(symbols)
+        response = await self.client.post(api_url, data=data)
         return response
 
     async def update_watchlist(self, named: str, symbols: list[str]):
-        api_url = self.API_ROOT.format(group="api", method="v2/watchlists")
+        api_url = self.API_ROOT.format(group="api", method="v2/watchlists:by_name")
         query = dict(name=named)
-        if symbols:
-            query["symbols"] = ",".join(symbols)
-        response = await self.client.put(api_url, params=query)
+        data = dict(name=named, symbols=list(symbols))
+        response = await self.client.put(api_url, params=query, data=data)
         return response
 
     async def delete_watchlist(self, named: str):
