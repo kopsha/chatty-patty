@@ -2,7 +2,6 @@ from dataclasses import dataclass, fields
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum, auto
-from functools import cached_property
 from types import SimpleNamespace
 from typing import Optional, Union, Type, Self
 from uuid import UUID
@@ -10,8 +9,8 @@ from uuid import UUID
 from hasty import HastyClient
 
 
-class AlpacaScavenger:
-    API_ROOT = "https://{group}.alpaca.markets"
+class AlpacaClient:
+    API_ROOT = "https://{group}.alpaca.markets/{method}"
 
     def __init__(self, api_key: str, secret: str):
         self.auth_headers = {
@@ -20,229 +19,111 @@ class AlpacaScavenger:
         }
         self.client = None
 
-        self.watchlist = SimpleNamespace(name="Hidden Multiplier", symbols=set())
-        self.quotes = dict()
-        self.account = None
-        self.is_market_open = False
-
     async def on_start(self):
         self.client = HastyClient(auth_headers=self.auth_headers)
 
     async def on_stop(self):
+        await self.client.session.close()
         self.client = None
 
     async def fetch_account_info(self):
-        url = f"{self.API_ROOT}/v2/account".format(group="api")
-
-        async with self.session.get(
-            url,
-            headers=self.auth_headers,
-            raise_for_status=True,
-        ) as response:
-            response_data = await response.json()
-
-        self.account = Account.from_alpaca(data=response_data)
+        api_url = self.API_ROOT.format(group="api", method="v2/account")
+        response = await self.client.get(api_url)
+        self.account = Account.from_alpaca(response)
 
     async def fetch_market_clock(self):
-        url = f"{self.API_ROOT}/v2/clock".format(group="api")
-        async with self.session.get(
-            url,
-            headers=self.auth_headers,
-            raise_for_status=True,
-        ) as response:
-            response_data = await response.json()
-
-        self.is_market_open = response_data["is_open"]
+        api_url = self.API_ROOT.format(group="api", method="v2/clock")
+        response = await self.client.get(api_url)
+        self.is_market_open = response.is_open
 
     async def fetch_orders(self):
-        url = f"{self.API_ROOT}/v2/orders".format(group="api")
+        api_url = self.API_ROOT.format(group="api", method="v2/orders")
         query = dict(
             status="all",
             limit=500,
             direction="asc",
         )
-
-        async with self.session.get(
-            url,
-            headers=self.auth_headers,
-            params=query,
-            raise_for_status=True,
-        ) as response:
-            response_data = await response.json()
-
-        orders = [from_alpaca(Cls=Order, data=data) for data in response_data]
+        response = await self.client.get(api_url, params=query)
+        orders = [from_alpaca(Cls=Order, data=data) for data in response]
         return orders
 
-    async def setup_watchlists(self):
-        watchlist = await self.fetch_watchlist()
-        if hasattr(watchlist, "assets"):
-            print("Watchlist already exist, refreshing assets...")
-            for ass in watchlist.assets:
-                self.watchlist.symbols.add(ass.symbol)
-                self.quotes[ass.symbol] = dict()
-        else:
-            print("Watchlist does not exist, creating one...")
-            await self.create_watchlist()
+    async def fetch_watchlist(self, named: str):
+        api_url = self.API_ROOT.format(group="api", method="v2/watchlists")
+        query = dict(name=named)
+        response = await self.client.get(api_url, params=query)
+        return response
 
-    async def fetch_watchlists(self):
-        url = f"{self.API_ROOT}/v2/watchlists".format(group="api")
-        async with self.session.get(
-            url,
-            headers=self.auth_headers,
-            params=dict(name=self.watchlist.name),
-            raise_for_status=True,
-        ) as response:
-            response_data = await response.json()
-        return to_namespace(response_data)
+    async def find_watchlist(self, named: str):
+        api_url = self.API_ROOT.format(group="api", method="v2/watchlists:by_name")
+        query = dict(name=named)
+        response = await self.client.get(api_url, params=query)
+        return response
 
-    async def create_watchlist(self):
-        url = f"{self.API_ROOT}/v2/watchlists".format(group="api")
-        data = dict(name=self.watchlist.name)
-        if self.watchlist.symbols:
-            data["symbols"] = ",".join(self.watchlist.symbols)
+    async def create_watchlist(self, named: str, symbols: list[str]):
+        api_url = self.API_ROOT.format(group="api", method="v2/watchlists")
+        query = dict(name=named)
+        if symbols:
+            query["symbols"] = ",".join(symbols)
+        response = await self.client.post(api_url, params=query)
+        return response
 
-        async with self.session.post(
-            url,
-            headers=self.auth_headers,
-            raise_for_status=True,
-            json=data,
-        ) as response:
-            response_data = await response.json()
+    async def update_watchlist(self, named: str, symbols: list[str]):
+        api_url = self.API_ROOT.format(group="api", method="v2/watchlists")
+        query = dict(name=named)
+        if symbols:
+            query["symbols"] = ",".join(symbols)
+        response = await self.client.put(api_url, params=query)
+        return response
 
-        return to_namespace(response_data)
+    async def delete_watchlist(self, named: str):
+        api_url = self.API_ROOT.format(group="api", method="v2/watchlists:by_name")
+        query = dict(name=named)
+        response = await self.client.delete(api_url, params=query)
+        return response
 
-    async def fetch_watchlist(self):
-        url = f"{self.API_ROOT}/v2/watchlists:by_name".format(group="api")
-        async with self.session.get(
-            url,
-            headers=self.auth_headers,
-            params=dict(name=self.watchlist.name),
-        ) as response:
-            if response.status == 200:
-                response_data = await response.json()
-            else:
-                response_data = dict()
-        return to_namespace(response_data)
-
-    async def update_watchlist(self):
-        url = f"{self.API_ROOT}/v2/watchlists:by_name".format(group="api")
-        data = dict(
-            name=self.watchlist.name,
-            symbols=list(self.watchlist.symbols),
-        )
-        async with self.session.put(
-            url,
-            headers=self.auth_headers,
-            params=dict(name=self.watchlist.name),
-            raise_for_status=True,
-            json=data,
-        ) as response:
-            response_data = await response.json()
-
-        return to_namespace(response_data)
-
-    async def delete_watchlist(self, by_id):
-        url = f"{self.API_ROOT}/v2/watchlists/{by_id}".format(group="api")
-        await self.session.delete(
-            url,
-            headers=self.auth_headers,
-            raise_for_status=True,
-        )
-
-    async def fetch_quotes(self, symbols):
-        url = f"{self.API_ROOT}/v2/stocks/quotes/latest".format(group="data")
+    async def fetch_quotes(self, symbols: list[str]):
+        api_url = self.API_ROOT.format(group="data", method="v2/stocks/quotes/latest")
         query = dict(feed="iex", symbols=",".join(symbols))
-
-        async with self.session.get(
-            url,
-            headers=self.auth_headers,
-            params=query,
-            raise_for_status=True,
-        ) as response:
-            response_data = await response.json()
+        response = await self.client.get(api_url, params=query)
 
         quotes = [
             Quote.from_alpaca(data=data, symbol=symbol)
-            for symbol, data in response_data["quotes"].items()
+            for symbol, data in response.quotes.__dict__.items()
         ]
         return quotes
 
     async def fetch_most_active(self):
-        url = f"{self.API_ROOT}/v1beta1/screener/stocks/most-actives".format(
-            group="data"
+        api_url = self.API_ROOT.format(
+            group="data", method="v1beta1/screener/most-actives"
         )
         query = dict(top=34, by="volume")
-
-        async with self.session.get(
-            url,
-            headers=self.auth_headers,
-            params=query,
-            raise_for_status=True,
-        ) as response:
-            response_data = await response.json()
-
-        symbols = [to_namespace(data).symbol for data in response_data["most_actives"]]
+        response = await self.client.get(api_url, params=query)
+        symbols = [data.symbol for data in response.most_actives]
         return symbols
 
-    async def watch(self):
-        has_changed = list()
 
-        if self.is_market_open:
-            watchlist = self.watchlist.symbols
-        elif any(bool(x) is False for x in self.quotes.values()):
-            # NOTE: market is closed but we miss some values
-            watchlist = self.watchlist.symbols
-        else:
-            watchlist = []
+@dataclass
+class Account:
+    equity: Decimal
+    buying_power: Decimal
+    cash: Decimal
+    portfolio_value: Decimal
+    currency: str
+    account_number: str
 
-        if watchlist:
-            quotes = await self.fetch_quotes(watchlist)
-            for current in quotes:
-                previous = self.quotes.get(current.symbol, [])
-                if current != previous:
-                    has_changed.append(current.symbol)
-                    self.quotes[current.symbol] = current
+    @classmethod
+    def from_alpaca(Cls, response: SimpleNamespace) -> Self:
+        converted_data = dict()
+        decimal_fields = {"equity", "buying_power", "cash", "portfolio_value"}
+        string_fields = {"currency", "account_number"}
 
-        return has_changed
+        for key, value in response.__dict__.items():
+            if key in decimal_fields:
+                converted_data[key] = Decimal(value)
+            elif key in string_fields:
+                converted_data[key] = value
 
-    def as_opening_str(self) -> str:
-        flat_watchlist = ",".join(self.watchlist.symbols) or "(empty)"
-        return "\n".join(
-            (
-                f"- market is open: {self.is_market_open}",
-                f"- equity: {self.account.equity:.2f} $",
-                f"- portfolio: {self.account.portfolio_value:.2f} $",
-                f"- cash: {self.account.cash:.2f} $ / {self.account.buying_power:.2f} $",
-                f"- watchlist: {flat_watchlist}",
-            )
-        )
-
-    @cached_property
-    def known_commands(self):
-        return {func[4:] for func in dir(self) if func.startswith("cmd_")}
-
-    async def run_commands(self, commands):
-        for cmd, params in commands:
-            func = getattr(self, "cmd_" + cmd)
-            await func(params)
-
-    async def cmd_tail(self, params):
-        clean_params = set(map(str.upper, params))
-        self.watchlist.symbols.update(clean_params)
-        for symbol in clean_params:
-            self.quotes[symbol] = None
-        await self.update_watchlist()
-
-    async def cmd_drop(self, params):
-        clean_params = set(map(str.upper, params))
-        self.watchlist.symbols.difference_update(clean_params)
-        for symbol in clean_params:
-            self.quotes.pop(symbol)
-        await self.update_watchlist()
-
-    async def cmd_reload(self, params):
-        for sym in self.watchlist.symbols:
-            self.quotes[sym] = dict()
+        return Cls(**converted_data)
 
 
 @dataclass
@@ -264,14 +145,14 @@ class Quote:
         )
 
     @staticmethod
-    def from_alpaca(symbol: str, data: dict):
+    def from_alpaca(symbol: str, data: SimpleNamespace):
         return Quote(
             symbol=symbol,
-            ts=data["t"],
-            ask_price=data["ap"],
-            ask_size=data["as"],
-            bid_price=data["bp"],
-            bid_size=data["bs"],
+            ts=data.t,
+            ask_price=data.ap,
+            ask_size=getattr(data, "as"),
+            bid_price=data.bp,
+            bid_size=data.bs,
         )
 
 
@@ -337,30 +218,6 @@ class Order:
     extended_hours: bool = False
     trail_percent: Optional[Union[Decimal, str]] = None
     trail_price: Optional[Union[Decimal, str]] = None
-
-
-@dataclass
-class Account:
-    equity: Decimal
-    buying_power: Decimal
-    cash: Decimal
-    portfolio_value: Decimal
-    currency: str
-    account_number: str
-
-    @classmethod
-    def from_alpaca(Cls, data) -> Self:
-        converted_data = dict()
-        decimal_fields = {"equity", "buying_power", "cash", "portfolio_value"}
-        string_fields = {"currency", "account_number"}
-
-        for key, value in data.items():
-            if key in decimal_fields:
-                converted_data[key] = Decimal(value)
-            elif key in string_fields:
-                converted_data[key] = value
-
-        return Cls(**converted_data)
 
 
 def from_alpaca(Cls: Type, data: dict):

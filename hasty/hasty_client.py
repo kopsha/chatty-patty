@@ -37,7 +37,7 @@ class HastyClient:
 
     async def _rest_call(
         self, verb: str, api_url: str, params: dict = {}, data: dict = {}
-    ) -> SimpleNamespace:
+    ) -> SimpleNamespace | list[SimpleNamespace]:
         """Invokes selected session method"""
         session_verb = self._session_call_map[verb]
 
