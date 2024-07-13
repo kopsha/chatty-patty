@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 
 import asyncio
-import certifi
 import os
-import ssl
 from functools import wraps
 from aiohttp import ClientSession, TCPConnector
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
