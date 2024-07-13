@@ -3,12 +3,11 @@
 import asyncio
 import os
 from functools import wraps
-from aiohttp import ClientSession, TCPConnector
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from configparser import ConfigParser
 
 from tellypatty import TellyPatty
-from alpaca import AlpacaScavenger
+# from alpaca import AlpacaScavenger
 
 CREDENTIALS_FILE = "credentials.ini"
 ERR_TOLERANCE = 1
@@ -31,66 +30,61 @@ def error_resilient(fn):
 
 class Seeker:
     def __init__(self, credentials):
-        self.credentials = credentials
-        self.session = None
         self.err_count = None
         self.keep_running = None
         self.scheduler = AsyncIOScheduler()
 
-        self.patty: TellyPatty = None
-        self.alpaca: AlpacaScavenger = None
+        self.patty = TellyPatty(
+            **credentials["telegram"],
+            command_set=set(["expose", "bye"]),
+        )
 
     async def on_start(self):
-        self.alpaca = AlpacaScavenger(
-            **self.credentials["alpaca"], use_session=self.session
-        )
-        self.patty = TellyPatty(
-            **self.credentials["telegram"],
-            command_set=self.alpaca.known_commands,
-            use_session=self.session,
-        )
-        self.patty.load_internals()
+        await self.patty.on_start()
 
-        await self.alpaca.fetch_account_info()
-        await self.alpaca.fetch_market_clock()
-        await self.alpaca.setup_watchlists()
+        # await self.alpaca.fetch_account_info()
+        # await self.alpaca.fetch_market_clock()
+        # await self.alpaca.setup_watchlists()
 
         message = "\n".join(
             (
-                "Scavanger hunting ready:",
-                self.alpaca.as_opening_str(),
+                "Telepathy channel is up and running...",
+                # self.alpaca.as_opening_str(),
             )
         )
         await self.patty.say(message)
 
     async def on_stop(self):
-        await self.patty.say("Bye!")
-
-        self.patty.save_internals()
-        self.patty = None
-        self.alpaca = None
+        await self.patty.say("Telepathy channel is closed.")
+        await self.patty.on_stop()
 
     @error_resilient
     async def fast_task(self):
         print(".", end="", flush=True)
 
-        changed_symbols = await self.alpaca.watch()
-        for symbol in changed_symbols:
-            msg = str(self.alpaca.quotes[symbol])
-            await self.patty.say(msg)
+        # changed_symbols = await self.alpaca.watch()
+        # for symbol in changed_symbols:
+        #     msg = str(self.alpaca.quotes[symbol])
+        #     await self.patty.say(msg)
 
     @error_resilient
-    async def slow_task(self):
-        print(".", end="", flush=True)
+    async def background_task(self):
+        print(":", end="", flush=True)
 
-        data = await self.patty.get_updates()
-        commands, errors = self.patty.digest_updates(data)
+        data = await self.patty.get_updates(timeout=34)
+        commands, system_commands, errors = self.patty.digest_updates(data)
         if errors:
-            reply = "I don't understand {}".format(", ".join(errors))
+            reply = "{}, really?!? Are you high?".format(", ".join(errors))
             await self.patty.say(reply)
 
+        for cmd in system_commands:
+            reply = f"Sure, I will do {cmd}."
+            await self.patty.say(reply)
+            if cmd == "bye":
+                await self._stop_all_tasks()
+
         # TODO: maybe give some feedback on commands
-        await self.alpaca.run_commands(commands)
+        # await self.alpaca.run_commands(commands)
 
     @error_resilient
     async def hourly(self):
@@ -98,24 +92,17 @@ class Seeker:
         self.alpaca.fetch_most_active()
 
     async def _open_session(self):
-        ssl_context = ssl.create_default_context(cafile=certifi.where())
-        self.session = ClientSession(connector=TCPConnector(ssl=ssl_context))
         self.err_count = 0
         self.keep_running = True
-
         await self.on_start()
 
     async def _close_session(self):
         self.keep_running = False
-
         await self.on_stop()
-
-        await self.session.close()
-        self.session = None
 
     async def _loop(self):
         while self.keep_running:
-            await self.slow_task()
+            await self.background_task()
             await asyncio.sleep(0.21)
 
     async def _stop_all_tasks(self):
@@ -125,7 +112,7 @@ class Seeker:
     async def main(self):
         await self._open_session()
 
-        self.scheduler.add_job(self.fast_task, "interval", seconds=21)
+        self.scheduler.add_job(self.fast_task, "interval", seconds=2)
         self.scheduler.add_job(self.hourly, "interval", hours=1)
         self.scheduler.start()
 
@@ -133,10 +120,10 @@ class Seeker:
         task = asyncio.create_task(self._loop())
         try:
             await task
-        except (KeyboardInterrupt, SystemExit):
+        except (KeyboardInterrupt, SystemExit, asyncio.CancelledError):
             pass
 
-        print("stopped main task")
+        print("\nstopped main task")
         if self.scheduler.running:
             self.scheduler.shutdown()
 

@@ -70,7 +70,9 @@ async def test_response_conversion_to_namespace(client):
 
 @pytest.mark.asyncio
 async def test_error_handling(client):
-    client.session.get.return_value.__aenter__.side_effect = RuntimeError("Expected Failure")
+    client.session.get.return_value.__aenter__.side_effect = RuntimeError(
+        "Expected Failure"
+    )
 
     with pytest.raises(RuntimeError) as exc_info:
         await client.get("http://example.com/error")
