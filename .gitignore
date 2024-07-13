@@ -1,7 +1,10 @@
 .DS_Store
-credentials.ini
-internals.ini
-*.dat
-*.png
 __pycache__/
 .venv
+
+*.dat
+*.png
+
+credentials.ini
+internals.ini
+
