@@ -24,7 +24,7 @@ class HastyClient:
         if attr not in self.VERBS:
             raise AttributeError(f"Attribute '{attr}' does not exist.")
 
-        return partial(self._rest_call, verb=attr)
+        return partial(self._rest_call, attr)
 
     @cached_property
     def _session_call_map(self):
@@ -36,7 +36,7 @@ class HastyClient:
         )
 
     async def _rest_call(
-        self, verb: str, api_url: str, params: dict = dict(), data: dict = dict()
+        self, verb: str, api_url: str, params: dict = {}, data: dict = {}
     ) -> SimpleNamespace:
         """Invokes selected session method"""
         session_verb = self._session_call_map[verb]

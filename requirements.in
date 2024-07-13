@@ -2,3 +2,4 @@ aiohttp[speedups]
 apscheduler
 certifi
 pytest
+pytest-asyncio
