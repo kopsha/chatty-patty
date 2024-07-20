@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 from dataclasses import dataclass
-from datetime import datetime
 from decimal import Decimal
 from enum import IntEnum
 from typing import ClassVar

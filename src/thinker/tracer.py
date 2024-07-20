@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import mplfinance as mpf
 import pandas as pd
 from matplotlib import pyplot as plt
-from metaflip import FIBONACCI, FULL_CYCLE, CandleStick, MarketSignal
+from metaflip import FIBONACCI, QUARTER_DAY_CYCLE, CandleStick, MarketSignal
 from ta.volatility import BollingerBands
 from ta.volume import money_flow_index, volume_weighted_average_price
 
@@ -16,7 +16,7 @@ from ta.volume import money_flow_index, volume_weighted_average_price
 class PinkyTracker:
     """Keeps track of a single symbol"""
 
-    def __init__(self, symbol: str, wix: int = 6, maxlen: int = FULL_CYCLE):
+    def __init__(self, symbol: str, wix: int = 6, maxlen: int = QUARTER_DAY_CYCLE):
         self.symbol = symbol
         self.wix = wix  # WindowIndex
         self.maxlen = maxlen
@@ -51,22 +51,13 @@ class PinkyTracker:
         df["high_velocity"] = df["high"].diff()
         df["low_velocity"] = df["low"].diff()
 
-        bb = BollingerBands(close=df["close"], window=self.window)
-        df["bb_high"] = bb.bollinger_hband()
-        df["bb_low"] = bb.bollinger_lband()
-
+        df["mavg"] = df["close"].rolling(self.window).mean()
         df["stdev"] = df["close"].rolling(self.window).std()
-        df["vwap"] = volume_weighted_average_price(
-            high=df["high"],
-            low=df["low"],
-            close=df["close"],
-            volume=df["volume"],
-            window=self.window,
-        )
-        # df["vwap_vhigh"] = df["vwap"] + 2 * df["stdev"]
-        df["vwap_high"] = df["vwap"] + 1.618 * df["stdev"]
-        df["vwap_low"] = df["vwap"] - 1.618 * df["stdev"]
-        # df["vwap_vlow"] = df["vwap"] - 2 * df["stdev"]
+        df["avg_price"] = (df["close"] + df["low"] + df["high"]) / 3
+
+        mult = 1.618
+        df["bb_high"] = df["mavg"] + (mult * df["stdev"])
+        df["bb_low"] = df["mavg"] - (mult * df["stdev"])
 
         return df
 
@@ -78,33 +69,51 @@ class PinkyTracker:
         return MarketSignal.HOLD
 
     def save_chart(self, df: pd.DataFrame, path: str):
+        high_crossings = df["close"].where(df["close"] >= df["bb_high"])
+        low_crossings = df["close"].where(df["close"] <= df["bb_low"])
         extras = [
-            mpf.make_addplot(df["bb_high"], color="blue", panel=0, secondary_y=False),
-            mpf.make_addplot(df["bb_low"], color="red", panel=0, secondary_y=False),
             mpf.make_addplot(
-                df["vwap"], color="blueviolet", panel=0, secondary_y=False
-            ),
-            # mpf.make_addplot(
-            #     df["vwap_vhigh"], color="royalblue", panel=0, secondary_y=False
-            # ),
-            mpf.make_addplot(
-                df["vwap_high"], color="deepskyblue", panel=0, secondary_y=False
+                df["bb_high"], color="darkorange", panel=0, secondary_y=False
             ),
             mpf.make_addplot(
-                df["vwap_low"], color="darkorange", panel=0, secondary_y=False
+                df["bb_low"], color="royalblue", panel=0, secondary_y=False
             ),
-            # mpf.make_addplot(
-            #     df["vwap_vlow"], color="orangered", panel=0, secondary_y=False
-            # ),
+            mpf.make_addplot(
+                df["mavg"], color="deepskyblue", panel=0, secondary_y=False
+            ),
+            mpf.make_addplot(
+                df["avg_price"], color="lightgray", panel=0, secondary_y=False
+            ),
+            mpf.make_addplot(
+                high_crossings, type="scatter", markersize=100, marker=0, color="r"
+            ),
+            mpf.make_addplot(
+                low_crossings, type="scatter", markersize=100, marker=0, color="g"
+            ),
         ]
 
+        high = df["high"].max()
+        low = df["low"].min()
+
+        fib_ratios = [0, 0.236, 0.382, 0.5, 0.618, 1]
+        fib_levels = [high - (high - low) * ratio for ratio in fib_ratios]
+
+        for i, level in enumerate(fib_levels):
+            extras.append(
+                mpf.make_addplot(
+                    [level] * len(df), type="line", color="black", width=0.6, panel=0
+                )
+            )
+
+        chart_type = "candle"
         fig, axes = mpf.plot(
             df,
-            type="candle",
+            type=chart_type,
             addplot=extras,
             title=self.symbol,
             volume=True,
             figsize=(21, 13),
+            style="yahoo",
             tight_layout=True,
             xrotation=0,
             returnfig=True,
@@ -116,7 +125,7 @@ class PinkyTracker:
             ax.margins(x=0.1, y=0.1, tight=True)
 
         # TODO: deal with paths later
-        filename = f"{self.symbol}.png"
+        filename = f"{self.symbol}-{chart_type}.png"
         filepath = os.path.join(path, filename)
         plt.savefig(filepath, bbox_inches="tight", pad_inches=0.3, dpi=300)
         plt.close()
@@ -162,14 +171,14 @@ def from_yfapi(data):
 def main():
     import json
 
-    with open("sample-xcur-5m.json") as datafile:
+    with open("sample-bitf-1m.json") as datafile:
         raw_data = json.loads(datafile.read())
 
     data = to_namespace(raw_data["chart"]["result"][0])
     points = from_yfapi(data)
 
     print("testing")
-    tracer = PinkyTracker(symbol="XCUR", wix=4)
+    tracer = PinkyTracker(symbol="BITF", wix=6)
     tracer.feed(points)
     df = tracer.make_indicators()
     tracer.save_chart(df, path="charts")
