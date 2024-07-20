@@ -1,5 +1,6 @@
 aiohttp[speedups]
 apscheduler
 certifi
-pytest
-pytest-asyncio
+pandas
+matplotlib
+ta

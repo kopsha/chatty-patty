@@ -2,13 +2,12 @@
 
 import asyncio
 import os
-from functools import wraps
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from configparser import ConfigParser
+from functools import wraps
 
-from tellypatty import TellyPatty
 from alpaca import AlpacaScavenger
-
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from tellypatty import TellyPatty
 
 CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", "credentials.ini")
 ERR_TOLERANCE = 1
