@@ -14,7 +14,12 @@ main()
             bash
             ;;
         start)
-            printf "\t..: Starting the service.\n"
+            printf "\t..: Starting the main service\n"
+            python src/main.py
+            ;;
+        develop)
+            printf "\t..: Starting the main service\n"
+            find src -name "*.py" | entr -rc python src/main.py
             ;;
         *)
             printf "\t..: Invoking '$@'\n"
