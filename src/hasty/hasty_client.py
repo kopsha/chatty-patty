@@ -1,10 +1,10 @@
-from aiohttp import ClientSession, TCPConnector
+import ssl
 from functools import cached_property, partial
 from types import SimpleNamespace
 from typing import Any
 
-import ssl
 import certifi
+from aiohttp import ClientSession, TCPConnector
 
 
 class HastyClient:
@@ -42,7 +42,7 @@ class HastyClient:
         session_verb = self._session_call_map[verb]
 
         async with session_verb(
-            api_url, params=params, json=data, raise_for_status=True
+            api_url, params=params, json=data or None, raise_for_status=True
         ) as response:
             response_data = await response.json()
 

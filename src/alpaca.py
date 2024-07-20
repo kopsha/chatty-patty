@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 from alpaca_client import AlpacaClient
 
-class AlpacaScavenger:
 
+class AlpacaScavenger:
     def __init__(self, api_key: str, secret):
         self.client = AlpacaClient(api_key, secret)
 

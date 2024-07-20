@@ -77,12 +77,8 @@ class PinkyTracker:
     def save_chart(self, df: pd.DataFrame, path: str):
         # TODO: kept only for reference
         extras = [
-            mpf.make_addplot(
-                df["bb_high"], color="lime", panel=0, secondary_y=False
-            ),
-            mpf.make_addplot(
-                df["bb_low"], color="gold", panel=0, secondary_y=False
-            ),
+            mpf.make_addplot(df["bb_high"], color="lime", panel=0, secondary_y=False),
+            mpf.make_addplot(df["bb_low"], color="gold", panel=0, secondary_y=False),
             mpf.make_addplot(
                 df["vwap"], color="blueviolet", panel=0, secondary_y=False
             ),
@@ -124,6 +120,7 @@ class PinkyTracker:
         plt.savefig(filepath, bbox_inches="tight", pad_inches=0.3, dpi=300)
         plt.close()
 
+
 def main():
     print("testing")
     tracer = PinkyTracker(symbol="AAPL")
@@ -132,6 +129,7 @@ def main():
     tracer.save_chart(df, path="charts")
 
     print("done")
+
 
 if __name__ == "__main__":
     main()

@@ -1,15 +1,13 @@
 from hasty import HastyClient
 
 
-class YahooFinanceClient(HastyClient):
+class YahooFinanceClient:
     """Seeking Alpha wrapper from https://www.yahoofinanceapi.com/"""
 
     API_ROOT = "https://yfapi.net/{method}"
 
     def __init__(self, api_key: str):
         self.auth_headers = {"x-api-key": api_key}
-        # self.auth_headers["accept"] = "application/json"
-        # self.auth_headers["origin"] = "https://www.yahoofinanceapi.com"
         self.client: HastyClient = None
 
     async def on_start(self):
@@ -26,9 +24,14 @@ class YahooFinanceClient(HastyClient):
         response = await self.client.get(api_url, params=query)
         return response
 
-    async def fetch_chart_for(self, symbol, period: str = "1Y"):
+    async def fetch_chart(self, symbol):
         """Past year OHLC prices for the given symbol"""
-        api_url = self.API_ROOT.format(method="symbol/get-chart")
-        query = dict(symbol=symbol, period=period)
+        api_url = self.API_ROOT.format(method=f"v8/finance/chart/{symbol}")
+        query = dict(
+            range="1mo",
+            interval="1d",
+            lang="en",
+            region="US",
+        )
         response = await self.client.get(api_url, params=query)
         return response
