@@ -1,0 +1,12 @@
+services:
+    patty:
+        build: .
+        volumes:
+            - ./credentials.ini:/app/credentials.ini
+            - ./src:/app/src
+            - ./data:/app/data
+        user: "1010"
+        environment:
+            - CREDENTIALS_FILE=/app/credentials.ini
+            - PRIVATE_CACHE=/app/data
+

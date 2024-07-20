@@ -9,7 +9,7 @@ from configparser import ConfigParser
 from tellypatty import TellyPatty
 from alpaca import AlpacaScavenger
 
-CREDENTIALS_FILE = "credentials.ini"
+CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", "credentials.ini")
 ERR_TOLERANCE = 1
 
 

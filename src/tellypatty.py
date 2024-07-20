@@ -8,7 +8,7 @@ from hasty import HastyClient
 class TellyPatty:
     """Telepathic Bot"""
 
-    PRIVATE_CACHE = "internals.dat"
+    PRIVATE_CACHE = os.path.join(os.getenv("PRIVATE_CACHE", "."), "internals.dat")
     API_ROOT = "https://api.telegram.org/bot{token}/{method}"
 
     def __init__(self, token: str, chat_id: str | int, command_set: set):
