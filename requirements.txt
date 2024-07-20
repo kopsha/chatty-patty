@@ -32,6 +32,8 @@ frozenlist==1.4.1
     #   aiosignal
 idna==3.7
     # via yarl
+iniconfig==2.0.0
+    # via pytest
 kiwisolver==1.4.5
     # via matplotlib
 matplotlib==3.9.1
@@ -51,7 +53,9 @@ numpy==2.0.0
     #   pandas
     #   ta
 packaging==24.1
-    # via matplotlib
+    # via
+    #   matplotlib
+    #   pytest
 pandas==2.2.2
     # via
     #   -r requirements.in
@@ -59,12 +63,20 @@ pandas==2.2.2
     #   ta
 pillow==10.4.0
     # via matplotlib
+pluggy==1.5.0
+    # via pytest
 pycares==4.4.0
     # via aiodns
 pycparser==2.22
     # via cffi
 pyparsing==3.1.2
     # via matplotlib
+pytest==8.2.2
+    # via
+    #   -r requirements.in
+    #   pytest-asyncio
+pytest-asyncio==0.23.8
+    # via -r requirements.in
 python-dateutil==2.9.0.post0
     # via
     #   matplotlib

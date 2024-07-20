@@ -29,14 +29,12 @@ class CandleStick:
         volume="float",
     )
 
-    open_time: datetime
+    timestamp: int
     open: Decimal
     high: Decimal
     low: Decimal
     close: Decimal
-    close_time: datetime
     volume: Decimal
-    trades: int
 
 
 class MarketSignal(IntEnum):

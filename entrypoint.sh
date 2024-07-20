@@ -13,6 +13,9 @@ main()
         shell)
             bash
             ;;
+        selfcheck)
+            pytest src
+            ;;
         start)
             printf "\t..: Starting the main service\n"
             python src/main.py
