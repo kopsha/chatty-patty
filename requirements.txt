@@ -35,6 +35,10 @@ idna==3.7
 kiwisolver==1.4.5
     # via matplotlib
 matplotlib==3.9.1
+    # via
+    #   -r requirements.in
+    #   mplfinance
+mplfinance==0.12.10b0
     # via -r requirements.in
 multidict==6.0.5
     # via
@@ -51,6 +55,7 @@ packaging==24.1
 pandas==2.2.2
     # via
     #   -r requirements.in
+    #   mplfinance
     #   ta
 pillow==10.4.0
     # via matplotlib

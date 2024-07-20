@@ -1,148 +1,102 @@
+from collections import deque
+from decimal import Decimal
+from functools import cached_property
+import os
+
+import mplfinance as mpf
 import pandas as pd
-from ta.trend import ADXIndicator
+from matplotlib import pyplot as plt
 from ta.volatility import BollingerBands
 from ta.volume import money_flow_index, volume_weighted_average_price
 
-from .metaflip import FIBONACCI, FULL_CYCLE, CandleStick, MarketSignal
-
-# import mplfinance as mpf
-# from matplotlib import pyplot as plt
+from metaflip import FIBONACCI, FULL_CYCLE, CandleStick, MarketSignal
 
 
 class PinkyTracker:
-    def __init__(self, trading_pair, wix=6):
-        self.base_symbol, self.quote_symbol = trading_pair
-        self.wix = wix
+    """Keeps track of a single symbol"""
 
-        self.data = pd.DataFrame(
-            columns=[
-                "open_time",
-                "open",
-                "high",
-                "low",
-                "close",
-                "volume",
-                "close_time",
-            ]
-        )
-
+    def __init__(self, symbol: str, wix: int = 6, maxlen: int = FULL_CYCLE):
+        self.symbol = symbol
+        self.wix = wix  # WindowIndex
+        self.maxlen = maxlen
+        self.data: deque[CandleStick] = deque(maxlen=maxlen)
+        self.price: Decimal = Decimal()
         self.pre_signal = None
 
-        # prepare for cached reads
-        # symbol = "".join(trading_pair)
-        # os.makedirs(f"./{symbol}", exist_ok=True)
-
-    @property
-    def faster_window(self):
-        return FIBONACCI[self.wix - 1]
-
-    @property
-    def fast_window(self):
-        return FIBONACCI[self.wix - 1]
-
-    @property
-    def window(self):
-        return FIBONACCI[self.wix]
-
-    @property
-    def slow_window(self):
-        return FIBONACCI[self.wix + 1]
-
-    @property
-    def slower_window(self):
-        return FIBONACCI[self.wix + 1]
-
-    @property
-    def price(self):
-        return float(self.data["close"].iloc[-1])
-
-    def pop_close_time(self):
-        self.data.drop(self.data.tail(1).index, inplace=True)
-        if self.data["close_time"].size:
-            close_time = int(self.data["close_time"].iloc[-1].timestamp()) * 1000
-        else:
-            close_time = None
-        return close_time
-
-    def feed(self, kline_data, limit=FULL_CYCLE):
-        if not kline_data:
+    def feed(self, data_points: list[dict]):
+        if not data_points:
             print("Provided feed seems empty, skipped.")
             return
 
-        if len(kline_data) > limit:
-            kline_data = kline_data[-limit:]
-            print(f"Provided feed was truncated to last {len(kline_data)}.")
+        self.data.extend(CandleStick(**x) for x in data_points)
+        self.price = self.data[-1].close
 
-        klines = [CandleStick(x) for x in kline_data]
-        new_df = pd.DataFrame(klines)
-        new_df.index = pd.DatetimeIndex(new_df["open_time"])
+        # TODO: maybe trigger some analysis
 
-        self.data = pd.concat([self.data.tail(limit - new_df.size), new_df])
+    @cached_property
+    def window(self):
+        return FIBONACCI[self.wix]
 
-    def run_indicators(self):
-        df = self.data.astype(
-            {
-                "open": "float",
-                "high": "float",
-                "low": "float",
-                "close": "float",
-                "volume": "float",
-            }
-        )
+    def make_indicators(self) -> pd.DataFrame:
+        if not self.data:
+            print("Cannot analyze anything, data feed is empty.")
+            return pd.DataFrame()
 
-        # self.data["velocity"] = self.data["close"].diff()
-        self.data["high_velocity"] = self.data["high"].diff()
-        self.data["low_velocity"] = self.data["low"].diff()
+        df = pd.DataFrame(self.data).astype(CandleStick.AS_DTYPE)
+
+        df["velocity"] = df["close"].diff()
+        df["high_velocity"] = df["high"].diff()
+        df["low_velocity"] = df["low"].diff()
 
         bb = BollingerBands(close=df["close"], window=self.window)
-        self.data["bb_high"] = bb.bollinger_hband()
-        self.data["bb_low"] = bb.bollinger_lband()
+        df["bb_high"] = bb.bollinger_hband()
+        df["bb_low"] = bb.bollinger_lband()
 
-        self.data["stdev"] = df["close"].rolling(self.window).std()
-        self.data["vwap"] = volume_weighted_average_price(
+        df["stdev"] = df["close"].rolling(self.window).std()
+        df["vwap"] = volume_weighted_average_price(
             high=df["high"],
             low=df["low"],
             close=df["close"],
             volume=df["volume"],
             window=self.window,
         )
-        self.data["vwap_vhigh"] = self.data["vwap"] + 2 * self.data["stdev"]
-        self.data["vwap_high"] = self.data["vwap"] + 1 * self.data["stdev"]
-        self.data["vwap_low"] = self.data["vwap"] - 1 * self.data["stdev"]
-        self.data["vwap_vlow"] = self.data["vwap"] - 2 * self.data["stdev"]
+        df["vwap_vhigh"] = df["vwap"] + 2 * df["stdev"]
+        df["vwap_high"] = df["vwap"] + 1 * df["stdev"]
+        df["vwap_low"] = df["vwap"] - 1 * df["stdev"]
+        df["vwap_vlow"] = df["vwap"] - 2 * df["stdev"]
 
-    def show_chart(self):
-        df = self.data.astype(
-            {
-                "open": "float",
-                "high": "float",
-                "low": "float",
-                "close": "float",
-                "volume": "float",
-            }
-        )  # again :()
+        return df
 
+    def compute_triggers(self, df: pd.DataFrame):
+        # TODO: why not use bollinger bands
+        high = df["bb_high"].iloc[-1]
+        low = df["bb_low"].iloc[-1]
+
+        return MarketSignal.HOLD
+
+    def save_chart(self, df: pd.DataFrame, path: str):
+        # TODO: kept only for reference
         extras = [
-            # mpf.make_addplot(
-            #     self.data["bb_high"], color="lime", panel=0, secondary_y=False
-            # ),
-            # mpf.make_addplot(
-            #     self.data["bb_low"], color="gold", panel=0, secondary_y=False
-            # ),
             mpf.make_addplot(
-                self.data["vwap"], color="blueviolet", panel=0, secondary_y=False
+                df["bb_high"], color="lime", panel=0, secondary_y=False
             ),
             mpf.make_addplot(
-                self.data["vwap_vhigh"], color="royalblue", panel=0, secondary_y=False
+                df["bb_low"], color="gold", panel=0, secondary_y=False
             ),
             mpf.make_addplot(
-                self.data["vwap_high"], color="deepskyblue", panel=0, secondary_y=False
+                df["vwap"], color="blueviolet", panel=0, secondary_y=False
             ),
             mpf.make_addplot(
-                self.data["vwap_low"], color="darkorange", panel=0, secondary_y=False
+                df["vwap_vhigh"], color="royalblue", panel=0, secondary_y=False
             ),
             mpf.make_addplot(
-                self.data["vwap_vlow"], color="orangered", panel=0, secondary_y=False
+                df["vwap_high"], color="deepskyblue", panel=0, secondary_y=False
+            ),
+            mpf.make_addplot(
+                df["vwap_low"], color="darkorange", panel=0, secondary_y=False
+            ),
+            mpf.make_addplot(
+                df["vwap_vlow"], color="orangered", panel=0, secondary_y=False
             ),
         ]
 
@@ -150,8 +104,8 @@ class PinkyTracker:
             df,
             type="candle",
             addplot=extras,
-            title=f"{self.base_symbol}/{self.quote_symbol}",
-            # volume=True,
+            title=self.symbol,
+            volume=True,
             figsize=(13, 8),
             tight_layout=True,
             style="yahoo",
@@ -164,78 +118,20 @@ class PinkyTracker:
             ax.yaxis.label.set_visible(False)
             ax.margins(x=0.1, y=0.1, tight=False)
 
-        plt.savefig(
-            f"{self.base_symbol}_{self.quote_symbol}.png",
-            bbox_inches="tight",
-            pad_inches=0.3,
-            dpi=300,
-        )
+        # TODO: deal with paths later
+        filename = f"{self.symbol}.png"
+        filepath = os.path.join(path, filename)
+        plt.savefig(filepath, bbox_inches="tight", pad_inches=0.3, dpi=300)
         plt.close()
 
-    def compute_triggers(self):
-        price = self.price
-        high = self.data["bb_high"].iloc[-1]
-        low = self.data["bb_low"].iloc[-1]
-        high_velocity = self.data["high_velocity"].iloc[-1]
-        low_velocity = self.data["low_velocity"].iloc[-1]
+def main():
+    print("testing")
+    tracer = PinkyTracker(symbol="AAPL")
+    tracer.feed([])
+    df = tracer.make_indicators()
+    tracer.save_chart(df, path="charts")
 
-        if self.pre_signal == MarketSignal.SELL and high_velocity <= 0:
-            self.pre_signal = None
-            return MarketSignal.SELL
-        elif self.pre_signal == MarketSignal.BUY and low_velocity >= 0:
-            self.pre_signal = None
-            return MarketSignal.BUY
+    print("done")
 
-        if price >= high:
-            if high_velocity > 0:
-                self.pre_signal = MarketSignal.SELL
-            else:
-                self.pre_signal = None
-                return MarketSignal.SELL
-        elif price <= low:
-            if low_velocity < 0:
-                self.pre_signal = MarketSignal.BUY
-            else:
-                self.pre_signal = None
-                return MarketSignal.BUY
-
-        return MarketSignal.HOLD
-
-    def backtest(self):
-        pre_signal = None
-        for i, row in self.data.iterrows():
-            price = float(row["close"])
-            high = row["bb_high"]
-            low = row["bb_low"]
-            high_velocity = row["high_velocity"]
-            low_velocity = row["low_velocity"]
-
-            signal = None
-            if pre_signal == MarketSignal.SELL and high_velocity <= 0:
-                pre_signal = None
-                signal = MarketSignal.SELL
-            elif pre_signal == MarketSignal.BUY and low_velocity >= 0:
-                pre_signal = None
-                signal = MarketSignal.BUY
-
-            if price >= high:
-                if high_velocity > 0:
-                    pre_signal = MarketSignal.SELL
-                else:
-                    pre_signal = None
-                    signal = MarketSignal.SELL
-            elif price <= low:
-                if low_velocity < 0:
-                    pre_signal = MarketSignal.BUY
-                else:
-                    pre_signal = None
-                    signal = MarketSignal.BUY
-
-            print(
-                row["close_time"].isoformat(),
-                pre_signal,
-                signal,
-                price,
-                low_velocity,
-                row["low"],
-            )
+if __name__ == "__main__":
+    main()

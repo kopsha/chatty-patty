@@ -8,6 +8,7 @@ from functools import wraps
 from alpaca import AlpacaScavenger
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from tellypatty import TellyPatty
+from yfapi_client import YahooFinanceClient
 
 CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", "credentials.ini")
 ERR_TOLERANCE = 1
@@ -39,6 +40,7 @@ class Seeker:
             **credentials["telegram"],
             command_set=self.alpaca.known_commands,
         )
+        self.yfapi = YahooFinanceClient(**credentials["yahoofinance"])
 
     async def on_start(self):
         await self.patty.on_start()

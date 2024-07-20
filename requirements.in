@@ -3,4 +3,7 @@ apscheduler
 certifi
 pandas
 matplotlib
+mplfinance
 ta
+pytest
+pytest-asyncio
