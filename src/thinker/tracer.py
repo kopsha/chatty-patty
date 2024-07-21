@@ -1,5 +1,5 @@
 import os
-from collections import deque
+from collections import deque, namedtuple
 from datetime import datetime
 from decimal import Decimal
 from functools import cached_property
@@ -7,10 +7,20 @@ from types import SimpleNamespace
 
 import mplfinance as mpf
 import pandas as pd
+from matplotlib import dates as mdates
 from matplotlib import pyplot as plt
-from metaflip import FIBONACCI, QUARTER_DAY_CYCLE, CandleStick, MarketSignal
-from ta.volatility import BollingerBands
-from ta.volume import money_flow_index, volume_weighted_average_price
+from matplotlib.patches import Patch, Rectangle
+from metaflip import (
+    FIBONACCI,
+    HALF_DAY_CYCLE,
+    QUARTER_DAY_CYCLE,
+    CandleStick,
+    MarketSignal,
+)
+from ta.volatility import average_true_range
+from ta.volume import on_balance_volume
+
+RenkoBrick = namedtuple("RenkoBrick", ["timestamp", "open", "close"])
 
 
 class PinkyTracker:
@@ -55,80 +65,136 @@ class PinkyTracker:
         df["stdev"] = df["close"].rolling(self.window).std()
         df["avg_price"] = (df["close"] + df["low"] + df["high"]) / 3
 
-        mult = 1.618
-        df["bb_high"] = df["mavg"] + (mult * df["stdev"])
-        df["bb_low"] = df["mavg"] - (mult * df["stdev"])
+        df["obv"] = on_balance_volume(close=df["close"], volume=df["volume"])
+        df["obv_velocity"] = df["obv"].diff()
+
+        df["atr"] = average_true_range(
+            high=df["high"],
+            low=df["low"],
+            close=df["close"],
+            window=FIBONACCI[self.wix + 1],
+        )
 
         return df
 
-    def compute_triggers(self, df: pd.DataFrame):
-        # TODO: why not use bollinger bands
-        high = df["bb_high"].iloc[-1]
-        low = df["bb_low"].iloc[-1]
+    def compute_renko_bricks(self, df: pd.DataFrame):
+        size = round(df["atr"].iloc[-1], 2)  # TODO: Find a smarter rounding
 
+        first_brick = RenkoBrick(df.index[0], df["open"].iloc[0], df["close"].iloc[0])
+
+        if first_brick.open < first_brick.close:
+            renko_high = round(first_brick.close, 2)
+            renko_low = min(round(first_brick.open, 2), renko_high - size)
+        else:
+            renko_high = round(first_brick.open, 2)
+            renko_low = min(round(first_brick.close, 2), renko_high - size)
+
+        bricks = list()
+        for row in df.itertuples():
+            if row.close >= renko_high + size:
+                while row.close >= renko_high + size:
+                    new_brick = RenkoBrick(row.Index, renko_high, renko_high + size)
+                    renko_low = renko_high
+                    renko_high += size
+                    bricks.append(new_brick)
+            elif row.close <= renko_low - size:
+                while row.close <= renko_low - size:
+                    new_brick = RenkoBrick(row.Index, renko_low, renko_low - size)
+                    renko_high = renko_low
+                    renko_low -= size
+                    bricks.append(new_brick)
+
+        return pd.DataFrame(bricks), size
+
+    def compute_triggers(self, df: pd.DataFrame):
         return MarketSignal.HOLD
 
-    def save_chart(self, df: pd.DataFrame, path: str):
-        high_crossings = df["close"].where(df["close"] >= df["bb_high"])
-        low_crossings = df["close"].where(df["close"] <= df["bb_low"])
-        extras = [
-            mpf.make_addplot(
-                df["bb_high"], color="darkorange", panel=0, secondary_y=False
-            ),
-            mpf.make_addplot(
-                df["bb_low"], color="royalblue", panel=0, secondary_y=False
-            ),
-            mpf.make_addplot(
-                df["mavg"], color="deepskyblue", panel=0, secondary_y=False
-            ),
-            mpf.make_addplot(
-                df["avg_price"], color="lightgray", panel=0, secondary_y=False
-            ),
-            mpf.make_addplot(
-                high_crossings, type="scatter", markersize=100, marker=0, color="r"
-            ),
-            mpf.make_addplot(
-                low_crossings, type="scatter", markersize=100, marker=0, color="g"
-            ),
-        ]
-
-        high = df["high"].max()
-        low = df["low"].min()
-
-        fib_ratios = [0, 0.236, 0.382, 0.5, 0.618, 1]
-        fib_levels = [high - (high - low) * ratio for ratio in fib_ratios]
-
-        for i, level in enumerate(fib_levels):
-            extras.append(
-                mpf.make_addplot(
-                    [level] * len(df), type="line", color="black", width=0.6, panel=0
-                )
-            )
-
-        chart_type = "candle"
+    def save_mpf_chart(self, df: pd.DataFrame, path: str, chart_type: str = "renko"):
+        mavs = sorted([10] + list(FIBONACCI[self.wix - 1 : self.wix + 1]))
         fig, axes = mpf.plot(
             df,
             type=chart_type,
-            addplot=extras,
-            title=self.symbol,
-            volume=True,
-            figsize=(21, 13),
+            mav=mavs,
             style="yahoo",
             tight_layout=True,
             xrotation=0,
+            figsize=(21, 13),
+            title=self.symbol,
+            volume=True,
             returnfig=True,
         )
+        axes[0].legend([self.symbol, *(f"SMA{x}" for x in mavs)])
 
         for ax in axes:
             ax.yaxis.tick_left()
-            ax.yaxis.label.set_visible(False)
-            ax.margins(x=0.1, y=0.1, tight=True)
 
         # TODO: deal with paths later
-        filename = f"{self.symbol}-{chart_type}.png"
+        filename = f"{self.symbol}-{chart_type}-mpf.png"
         filepath = os.path.join(path, filename)
-        plt.savefig(filepath, bbox_inches="tight", pad_inches=0.3, dpi=300)
+        plt.savefig(filepath, bbox_inches="tight", dpi=300)
         plt.close()
+        print("saved", filepath)
+
+    def save_renko_chart(self, renko_df: pd.DataFrame, size: float, path: str):
+        fig, ax = plt.subplots(figsize=(21, 13))
+
+        timestamps = list()
+        for i, brick in enumerate(renko_df.itertuples()):
+            if brick.open < brick.close:
+                rect = Rectangle(
+                    (i + 1, brick.open),
+                    1,
+                    brick.close - brick.open,
+                    facecolor="forestgreen",
+                    edgecolor="forestgreen",
+                    alpha=0.7,
+                )
+            else:
+                rect = Rectangle(
+                    (i + 1, brick.close),
+                    1,
+                    brick.open - brick.close,
+                    facecolor="tomato",
+                    edgecolor="tomato",
+                    alpha=0.7,
+                )
+            ax.add_patch(rect)
+            timestamps.append(brick.timestamp)
+
+        # humanize the axes
+        ax.set_xlim([0, renko_df.shape[0]])
+        ax.set_ylim(
+            [
+                min(min(renko_df["open"]), min(renko_df["close"])),
+                max(max(renko_df["open"]), max(renko_df["close"])),
+            ]
+        )
+
+        major_ticks = list()
+        major_labels = list()
+        minor_ticks = list()
+        for i, ts in enumerate(timestamps):
+            if i % 5 == 0:
+                major_ticks.append(i)
+                major_labels.append(ts.strftime("%H:%M"))
+            else:
+                minor_ticks.append(i)
+
+        ax.set_xticks(major_ticks)
+        ax.set_xticklabels(major_labels)
+        ax.set_xticks(minor_ticks, minor=True)
+        ax.grid()
+
+        up_patch = Patch(color="forestgreen", label=f"Up Brick ({size:.2f} $)")
+        down_patch = Patch(color="tomato", label=f"Down Brick ({size:.2f} $)")
+        ax.legend(handles=[up_patch, down_patch], loc="lower left")
+
+        # TODO: deal with paths later
+        filename = f"{self.symbol}-renko.png"
+        filepath = os.path.join(path, filename)
+        plt.savefig(filepath, bbox_inches="tight", dpi=300)
+        plt.close()
+        print("saved", filepath)
 
 
 def to_namespace(data):
@@ -177,11 +243,12 @@ def main():
     data = to_namespace(raw_data["chart"]["result"][0])
     points = from_yfapi(data)
 
-    print("testing")
-    tracer = PinkyTracker(symbol="BITF", wix=6)
+    print("starting over...")
+    tracer = PinkyTracker(symbol=data.meta.symbol, wix=5, maxlen=HALF_DAY_CYCLE)
     tracer.feed(points)
     df = tracer.make_indicators()
-    tracer.save_chart(df, path="charts")
+    renko_df, size = tracer.compute_renko_bricks(df)
+    tracer.save_renko_chart(renko_df, size, path="charts")
 
     print("done")
 
