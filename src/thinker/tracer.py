@@ -1,5 +1,5 @@
-import os
 import math
+import os
 from collections import deque, namedtuple
 from datetime import datetime
 from decimal import Decimal
@@ -94,13 +94,17 @@ class PinkyTracker:
         for row in df.itertuples():
             if row.close >= renko_high + size:
                 while row.close >= renko_high + size:
-                    new_brick = RenkoBrick(row.Index, renko_high, renko_high + size, "bull")
+                    new_brick = RenkoBrick(
+                        row.Index, renko_high, renko_high + size, "bulls"
+                    )
                     renko_low = renko_high
                     renko_high += size
                     bricks.append(new_brick)
             elif row.close <= renko_low - size:
                 while row.close <= renko_low - size:
-                    new_brick = RenkoBrick(row.Index, renko_low, renko_low - size, "bear")
+                    new_brick = RenkoBrick(
+                        row.Index, renko_low, renko_low - size, "bears"
+                    )
                     renko_high = renko_low
                     renko_low -= size
                     bricks.append(new_brick)
@@ -115,46 +119,45 @@ class PinkyTracker:
         bears = 0
 
         events = list()
-        side_swap = dict(bulls="bears", bears="bulls")
-        previous_side = None
+        previous_side = side = None
 
-        for brick in renko_df.itertuples():
-            if brick.kind == "bull":
+        for i, action in enumerate(renko_df.itertuples()):
+            if action.kind == "bulls":
                 bulls += 1
             else:
                 bears += 1
 
-            if bulls > bears:
-                zone = zone_log(bulls)
-                most, few, side = bulls, bears, "bulls"
-            elif bears > bulls:
-                zone = zone_log(bears)
-                most, few, side = bears, bulls, "bears"
-                
+            if action.kind != previous_side:
+                if previous_side == "bulls":
+                    zone = zone_log(bulls)
+                    if bears > zone:
+                        side = "bears"
+                else:
+                    zone = zone_log(bears)
+                    if bulls > zone:
+                        side = "bulls"
 
-            print(f"\t{bulls:>4} vs {bears:>4} [{zone} {side}]")
-            print("\t if", few, ">", zone, few > zone)
-            if few > zone:
-                # zone shows how many opposing counts are allows
-                side = side_swap[side]
-
-            if side != previous_side:
+            if previous_side != side:
+                events.append((i, side, action.timestamp))
                 if side == "bulls":
                     bears = 0
                 else:
                     bulls = 0
-
-                print("sides changed to", side, "zone", zone)
-                previous_side = side
             else:
-                if side == "bulls":
-                    bears -= 1 if bears else 0
-                else:
-                    bulls -= 1 if bulls else 0
+                if side == action.kind:
+                    if side == "bulls":
+                        bears = max(0, bears - 1)
+                    else:
+                        bulls = max(0, bulls - 1)
 
-            print(f"{bulls:>4} vs {bears:>4} [{zone} {side}]")
+            if action.kind == "bulls" and bulls == 3:
+                events.append((i, "confirmed bulls", action.timestamp))
+            elif action.kind == "bears" and bears == 3:
+                events.append((i, "confirmed bears", action.timestamp))
 
-        return []
+            previous_side = side
+
+        return events
 
     def save_mpf_chart(self, df: pd.DataFrame, path: str, chart_type: str = "renko"):
         mavs = sorted([10] + list(FIBONACCI[self.wix - 1 : self.wix + 1]))
@@ -208,7 +211,7 @@ class PinkyTracker:
             timestamps.append(brick.timestamp)
 
         # humanize the axes
-        ax.set_xlim([0, renko_df.shape[0]])
+        ax.set_xlim([0, renko_df.shape[0] + 1])
         ax.set_ylim(
             [
                 min(min(renko_df["open"]), min(renko_df["close"])),
@@ -282,7 +285,7 @@ def from_yfapi(data):
 def main():
     import json
 
-    with open("sample-bitf-1m.json") as datafile:
+    with open("sample-bitf-1h.json") as datafile:
         raw_data = json.loads(datafile.read())
 
     data = to_namespace(raw_data["chart"]["result"][0])
@@ -294,10 +297,12 @@ def main():
     df = tracer.make_indicators()
     renko_df, size = tracer.compute_renko_bricks(df)
 
-    tracer.run_mariashi_strategy(renko_df)
+    events = tracer.run_mariashi_strategy(renko_df)
+    for i, side, timestamp in events:
+        print(i, side, timestamp.strftime("%H:%M"))
 
     charts_path = os.getenv("OUTPUTS_PATH", "charts")
-    # tracer.save_renko_chart(renko_df, size, path=charts_path)
+    tracer.save_renko_chart(renko_df, size, path=charts_path)
 
     print("done")
 
