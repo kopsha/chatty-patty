@@ -1,4 +1,5 @@
 import os
+import math
 from collections import deque, namedtuple
 from datetime import datetime
 from decimal import Decimal
@@ -7,7 +8,6 @@ from types import SimpleNamespace
 
 import mplfinance as mpf
 import pandas as pd
-from matplotlib import dates as mdates
 from matplotlib import pyplot as plt
 from matplotlib.patches import Patch, Rectangle
 from metaflip import (
@@ -20,7 +20,7 @@ from metaflip import (
 from ta.volatility import average_true_range
 from ta.volume import on_balance_volume
 
-RenkoBrick = namedtuple("RenkoBrick", ["timestamp", "open", "close"])
+RenkoBrick = namedtuple("RenkoBrick", ["timestamp", "open", "close", "kind"])
 
 
 class PinkyTracker:
@@ -80,34 +80,81 @@ class PinkyTracker:
     def compute_renko_bricks(self, df: pd.DataFrame):
         size = round(df["atr"].iloc[-1], 2)  # TODO: Find a smarter rounding
 
-        first_brick = RenkoBrick(df.index[0], df["open"].iloc[0], df["close"].iloc[0])
+        first_open = df["open"].iloc[0]
+        first_close = df["close"].iloc[0]
 
-        if first_brick.open < first_brick.close:
-            renko_high = round(first_brick.close, 2)
-            renko_low = min(round(first_brick.open, 2), renko_high - size)
+        if first_open < first_close:
+            renko_high = round(first_close, 2)
+            renko_low = min(round(first_open, 2), renko_high - size)
         else:
-            renko_high = round(first_brick.open, 2)
-            renko_low = min(round(first_brick.close, 2), renko_high - size)
+            renko_high = round(first_open, 2)
+            renko_low = min(round(first_close, 2), renko_high - size)
 
         bricks = list()
         for row in df.itertuples():
             if row.close >= renko_high + size:
                 while row.close >= renko_high + size:
-                    new_brick = RenkoBrick(row.Index, renko_high, renko_high + size)
+                    new_brick = RenkoBrick(row.Index, renko_high, renko_high + size, "bull")
                     renko_low = renko_high
                     renko_high += size
                     bricks.append(new_brick)
             elif row.close <= renko_low - size:
                 while row.close <= renko_low - size:
-                    new_brick = RenkoBrick(row.Index, renko_low, renko_low - size)
+                    new_brick = RenkoBrick(row.Index, renko_low, renko_low - size, "bear")
                     renko_high = renko_low
                     renko_low -= size
                     bricks.append(new_brick)
 
         return pd.DataFrame(bricks), size
 
-    def compute_triggers(self, df: pd.DataFrame):
-        return MarketSignal.HOLD
+    def run_mariashi_strategy(self, renko_df: pd.DataFrame):
+        def zone_log(x: int):
+            return int(math.log(x - 1, 3)) if x > 1 else 0
+
+        bulls = 0
+        bears = 0
+
+        events = list()
+        side_swap = dict(bulls="bears", bears="bulls")
+        previous_side = None
+
+        for brick in renko_df.itertuples():
+            if brick.kind == "bull":
+                bulls += 1
+            else:
+                bears += 1
+
+            if bulls > bears:
+                zone = zone_log(bulls)
+                most, few, side = bulls, bears, "bulls"
+            elif bears > bulls:
+                zone = zone_log(bears)
+                most, few, side = bears, bulls, "bears"
+                
+
+            print(f"\t{bulls:>4} vs {bears:>4} [{zone} {side}]")
+            print("\t if", few, ">", zone, few > zone)
+            if few > zone:
+                # zone shows how many opposing counts are allows
+                side = side_swap[side]
+
+            if side != previous_side:
+                if side == "bulls":
+                    bears = 0
+                else:
+                    bulls = 0
+
+                print("sides changed to", side, "zone", zone)
+                previous_side = side
+            else:
+                if side == "bulls":
+                    bears -= 1 if bears else 0
+                else:
+                    bulls -= 1 if bulls else 0
+
+            print(f"{bulls:>4} vs {bears:>4} [{zone} {side}]")
+
+        return []
 
     def save_mpf_chart(self, df: pd.DataFrame, path: str, chart_type: str = "renko"):
         mavs = sorted([10] + list(FIBONACCI[self.wix - 1 : self.wix + 1]))
@@ -128,7 +175,6 @@ class PinkyTracker:
         for ax in axes:
             ax.yaxis.tick_left()
 
-        # TODO: deal with paths later
         filename = f"{self.symbol}-{chart_type}-mpf.png"
         filepath = os.path.join(path, filename)
         plt.savefig(filepath, bbox_inches="tight", dpi=300)
@@ -174,7 +220,7 @@ class PinkyTracker:
         major_labels = list()
         minor_ticks = list()
         for i, ts in enumerate(timestamps):
-            if i % 5 == 0:
+            if i % 10 == 0:
                 major_ticks.append(i)
                 major_labels.append(ts.strftime("%H:%M"))
             else:
@@ -189,7 +235,6 @@ class PinkyTracker:
         down_patch = Patch(color="tomato", label=f"Down Brick ({size:.2f} $)")
         ax.legend(handles=[up_patch, down_patch], loc="lower left")
 
-        # TODO: deal with paths later
         filename = f"{self.symbol}-renko.png"
         filepath = os.path.join(path, filename)
         plt.savefig(filepath, bbox_inches="tight", dpi=300)
@@ -243,12 +288,16 @@ def main():
     data = to_namespace(raw_data["chart"]["result"][0])
     points = from_yfapi(data)
 
-    print("starting over...")
+    print("====== starting over ======")
     tracer = PinkyTracker(symbol=data.meta.symbol, wix=5, maxlen=HALF_DAY_CYCLE)
     tracer.feed(points)
     df = tracer.make_indicators()
     renko_df, size = tracer.compute_renko_bricks(df)
-    tracer.save_renko_chart(renko_df, size, path="charts")
+
+    tracer.run_mariashi_strategy(renko_df)
+
+    charts_path = os.getenv("OUTPUTS_PATH", "charts")
+    # tracer.save_renko_chart(renko_df, size, path=charts_path)
 
     print("done")
 

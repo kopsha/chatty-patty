@@ -5,8 +5,10 @@ services:
             - ./credentials.ini:/app/credentials.ini
             - ./src:/app/src
             - ./data:/app/data
+            - ./out:/app/out
         user: "1010"
         environment:
             - CREDENTIALS_FILE=/app/credentials.ini
             - PRIVATE_CACHE=/app/data
+            - OUTPUTS_PATH=/app/out
         command: "start"

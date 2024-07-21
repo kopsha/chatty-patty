@@ -30,6 +30,7 @@ ENV VERSION=${VERSION}
 
 VOLUME [ "/app/src" ]
 VOLUME [ "/app/data" ]
+VOLUME [ "/app/out" ]
 
 ENTRYPOINT [ "/app/entrypoint.sh" ]
 CMD ["start"]
