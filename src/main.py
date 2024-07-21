@@ -44,16 +44,23 @@ class Seeker:
 
     async def on_start(self):
         await self.patty.on_start()
-        await self.alpaca.on_start()
         await self.yfapi.on_start()
-
-        data = await self.yfapi.fetch_chart(symbol="AAPL")
-        print(data)
+        await self.alpaca.on_start()
+        await self.alpaca.client.fetch_market_clock()
 
         message = "\n".join(
             (
                 "Telepathy channel is up and running...",
                 self.alpaca.as_opening_str(),
+            )
+        )
+        await self.patty.say(message)
+
+        symbols = await self.alpaca.client.fetch_most_active()
+        message = "\n".join(
+            (
+                "Most active stocks",
+                *symbols,
             )
         )
         await self.patty.say(message)
@@ -69,10 +76,10 @@ class Seeker:
     async def fast_task(self):
         print(".", end="", flush=True)
 
-        # changed_symbols = await self.alpaca.watch()
-        # for symbol in changed_symbols:
-        #     msg = str(self.alpaca.quotes[symbol])
-        #     await self.patty.say(msg)
+        changed_symbols = await self.alpaca.watch()
+        for symbol in changed_symbols:
+            msg = str(self.alpaca.quotes[symbol])
+            await self.patty.say(msg)
 
     @error_resilient
     async def background_task(self):
@@ -92,7 +99,7 @@ class Seeker:
                 await self._stop_all_tasks()
 
         # TODO: maybe give some feedback on commands
-        # await self.alpaca.run_commands(commands)
+        await self.alpaca.run_commands(commands)
 
     @error_resilient
     async def hourly(self):

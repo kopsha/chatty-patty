@@ -1,3 +1,4 @@
+import json
 import math
 import os
 from collections import deque, namedtuple
@@ -5,6 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from functools import cached_property
 from types import SimpleNamespace
+from pathlib import Path
 
 import mplfinance as mpf
 import pandas as pd
@@ -15,7 +17,6 @@ from metaflip import (
     HALF_DAY_CYCLE,
     QUARTER_DAY_CYCLE,
     CandleStick,
-    MarketSignal,
 )
 from ta.volatility import average_true_range
 from ta.volume import on_balance_volume
@@ -72,13 +73,15 @@ class PinkyTracker:
             high=df["high"],
             low=df["low"],
             close=df["close"],
-            window=FIBONACCI[self.wix + 1],
+            window=self.window,
         )
 
         return df
 
     def compute_renko_bricks(self, df: pd.DataFrame):
-        size = round(df["atr"].iloc[-1], 2)  # TODO: Find a smarter rounding
+        print(df["atr"].tail())
+        size = round(df["atr"].iloc[-1], 3)  # TODO: Find a smarter rounding
+        print(size)
 
         first_open = df["open"].iloc[0]
         first_close = df["close"].iloc[0]
@@ -138,7 +141,7 @@ class PinkyTracker:
                         side = "bulls"
 
             if previous_side != side:
-                events.append((i, side, action.timestamp))
+                events.append((i, f"{side} trend"))
                 if side == "bulls":
                     bears = 0
                 else:
@@ -151,9 +154,13 @@ class PinkyTracker:
                         bulls = max(0, bulls - 1)
 
             if action.kind == "bulls" and bulls == 3:
-                events.append((i, "confirmed bulls", action.timestamp))
+                if events and events[-1][0] == i:
+                    events.pop()
+                events.append((i, "confirmed bulls"))
             elif action.kind == "bears" and bears == 3:
-                events.append((i, "confirmed bears", action.timestamp))
+                if events and events[-1][0] == i:
+                    events.pop()
+                events.append((i, "confirmed bears"))
 
             previous_side = side
 
@@ -184,7 +191,9 @@ class PinkyTracker:
         plt.close()
         print("saved", filepath)
 
-    def save_renko_chart(self, renko_df: pd.DataFrame, size: float, path: str):
+    def save_renko_chart(
+        self, renko_df: pd.DataFrame, events: list, size: float, path: str, suffix: str
+    ):
         fig, ax = plt.subplots(figsize=(21, 13))
 
         timestamps = list()
@@ -211,7 +220,7 @@ class PinkyTracker:
             timestamps.append(brick.timestamp)
 
         # humanize the axes
-        ax.set_xlim([0, renko_df.shape[0] + 1])
+        ax.set_xlim([1, renko_df.shape[0] + 2])
         ax.set_ylim(
             [
                 min(min(renko_df["open"]), min(renko_df["close"])),
@@ -234,11 +243,30 @@ class PinkyTracker:
         ax.set_xticks(minor_ticks, minor=True)
         ax.grid()
 
+        color_map = {
+            "bulls trend": "forestgreen",
+            "bears trend": "tomato",
+            "confirmed bulls": "darkgreen",
+            "confirmed bears": "darkred",
+        }
+        for i, event in events:
+            color = color_map[event]
+            ax.axvline(x=i + 2, color=color, linestyle="--", linewidth=1, alpha=0.8)
+            ax.text(
+                i + 1.75,
+                ax.get_ylim()[1] * 0.999,
+                event,
+                rotation=90,
+                verticalalignment="top",
+                color=color,
+            )
+
         up_patch = Patch(color="forestgreen", label=f"Up Brick ({size:.2f} $)")
         down_patch = Patch(color="tomato", label=f"Down Brick ({size:.2f} $)")
-        ax.legend(handles=[up_patch, down_patch], loc="lower left")
+        window_patch = Patch(color="royalblue", label=f"ATR window {self.window}")
+        ax.legend(handles=[up_patch, down_patch, window_patch], loc="lower left")
 
-        filename = f"{self.symbol}-renko.png"
+        filename = f"{self.symbol}-renko-{suffix}.png"
         filepath = os.path.join(path, filename)
         plt.savefig(filepath, bbox_inches="tight", dpi=300)
         plt.close()
@@ -282,28 +310,29 @@ def from_yfapi(data):
     return points
 
 
-def main():
-    import json
-
-    with open("sample-bitf-1h.json") as datafile:
+def digest_sample(filename: str):
+    print(f"========================= {filename} ===")
+    with open(filename) as datafile:
         raw_data = json.loads(datafile.read())
 
     data = to_namespace(raw_data["chart"]["result"][0])
     points = from_yfapi(data)
 
-    print("====== starting over ======")
     tracer = PinkyTracker(symbol=data.meta.symbol, wix=5, maxlen=HALF_DAY_CYCLE)
     tracer.feed(points)
     df = tracer.make_indicators()
-    renko_df, size = tracer.compute_renko_bricks(df)
 
+    renko_df, size = tracer.compute_renko_bricks(df)
     events = tracer.run_mariashi_strategy(renko_df)
-    for i, side, timestamp in events:
-        print(i, side, timestamp.strftime("%H:%M"))
 
     charts_path = os.getenv("OUTPUTS_PATH", "charts")
-    tracer.save_renko_chart(renko_df, size, path=charts_path)
+    name = Path(filename).stem
+    tracer.save_renko_chart(renko_df, events, size, path=charts_path, suffix=name)
 
+
+def main():
+    for sample in Path().glob("*.json"):
+        digest_sample(sample)
     print("done")
 
 

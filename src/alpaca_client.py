@@ -93,7 +93,7 @@ class AlpacaClient:
 
     async def fetch_most_active(self):
         api_url = self.API_ROOT.format(
-            group="data", method="v1beta1/screener/most-actives"
+            group="data", method="v1beta1/screener/stocks/most-actives"
         )
         query = dict(top=34, by="volume")
         response = await self.client.get(api_url, params=query)
