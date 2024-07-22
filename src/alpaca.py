@@ -1,10 +1,25 @@
+import json
+import os
+from typing import Any
+from dataclasses import asdict, is_dataclass
 from functools import cached_property
+from pathlib import Path
 from types import SimpleNamespace
 
-from alpaca_client import AlpacaClient
+from alpaca_client import AlpacaClient, Bar
+from thinker import PinkyTracker
+
+
+class DataclassEncoder(json.JSONEncoder):
+    def default(self, o: Any) -> Any:
+        if is_dataclass(o):
+            return asdict(o)
+        return super().default(o)
 
 
 class AlpacaScavenger:
+    CACHE = Path(os.getenv("PRIVATE_CACHE", "."))
+
     def __init__(self, api_key: str, secret):
         self.client = AlpacaClient(api_key, secret)
 
@@ -73,6 +88,44 @@ class AlpacaScavenger:
                     self.quotes[current.symbol] = current
 
         return has_changed
+
+    async def scan_most_active(self):
+        active_symbols = await self.client.fetch_most_active(limit=13)
+
+        print("Most active symbols", active_symbols)
+
+        all_bars = dict()
+        for symbol in active_symbols:
+            # attempt to read from local cache
+            filepath = self.CACHE / f"{symbol}-1h.json"
+
+            if filepath.exists():
+                with open(filepath, "rt") as datafile:
+                    bars_data = json.loads(datafile.read())
+                    bars = [Bar.from_json(data) for data in bars_data]
+                print("loaded from cache", filepath)
+            else:
+                bars = await self.client.fetch_bars(symbol)
+                with open(filepath, "wt") as datafile:
+                    datafile.write(json.dumps(bars, indent=4, cls=DataclassEncoder))
+                print("saved to cache", filepath)
+
+            all_bars[symbol] = bars
+
+        print("retrieved", len(all_bars), "charts data")
+        for symbol, bars in all_bars.items():
+            tracer = PinkyTracker(symbol=symbol, wix=5)
+
+            tracer.feed(map(asdict, bars))
+            df = tracer.make_indicators()
+
+            renko_df, size = tracer.compute_renko_bricks(df)
+            events = tracer.run_mariashi_strategy(renko_df)
+
+            charts_path = os.getenv("OUTPUTS_PATH", "charts")
+            tracer.save_renko_chart(renko_df, events, size, path=charts_path, suffix="1h")
+            # tracer.save_mpf_chart(df, path=charts_path, suffix="1h")
+            # tracer.save_mpf_chart(df, path=charts_path, suffix="1h", chart_type="renko")
 
     @cached_property
     def known_commands(self):

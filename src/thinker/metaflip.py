@@ -26,6 +26,8 @@ class CandleStick:
         low="float",
         close="float",
         volume="float",
+        trades="int",
+        vw_price="float",
     )
 
     timestamp: int
@@ -34,6 +36,8 @@ class CandleStick:
     low: Decimal
     close: Decimal
     volume: Decimal
+    trades: int
+    vw_price: Decimal
 
 
 class MarketSignal(IntEnum):

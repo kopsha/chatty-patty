@@ -1,12 +1,41 @@
 from dataclasses import dataclass, fields
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum, auto
 from types import SimpleNamespace
-from typing import Optional, Union, Type, Self
+from typing import Optional, Self, Type, Union
 from uuid import UUID
 
 from hasty import HastyClient
+
+
+@dataclass
+class Bar:
+    timestamp: int
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float
+    trades: int
+    vw_price: float
+
+    @classmethod
+    def from_alpaca(cls, data: SimpleNamespace) -> Self:
+        return cls(
+            timestamp=int(datetime.fromisoformat(data.t).timestamp()),
+            open=float(data.o),
+            high=float(data.h),
+            low=float(data.l),
+            close=float(data.c),
+            volume=float(data.v),
+            trades=int(data.n),
+            vw_price=float(data.vw),
+        )
+
+    @classmethod
+    def from_json(cls, data: dict) -> Self:
+        return cls(**data)
 
 
 class AlpacaClient:
@@ -80,6 +109,15 @@ class AlpacaClient:
         response = await self.client.delete(api_url, params=query)
         return response
 
+    async def fetch_most_active(self, limit: int = 34):
+        api_url = self.API_ROOT.format(
+            group="data", method="v1beta1/screener/stocks/most-actives"
+        )
+        query = dict(top=limit, by="trades")
+        response = await self.client.get(api_url, params=query)
+        symbols = [data.symbol for data in response.most_actives]
+        return symbols
+
     async def fetch_quotes(self, symbols: list[str]):
         api_url = self.API_ROOT.format(group="data", method="v2/stocks/quotes/latest")
         query = dict(feed="iex", symbols=",".join(symbols))
@@ -91,14 +129,33 @@ class AlpacaClient:
         ]
         return quotes
 
-    async def fetch_most_active(self):
-        api_url = self.API_ROOT.format(
-            group="data", method="v1beta1/screener/stocks/most-actives"
+    async def fetch_bars(self, symbol: str, timeframe: str = "1H"):
+        api_url = self.API_ROOT.format(group="data", method="v2/stocks/bars")
+        six_months_ago = date.today() - timedelta(days=6 * 28)
+        query = dict(
+            feed="iex",
+            symbols=symbol,
+            timeframe=timeframe,
+            start=six_months_ago.isoformat(),
+            limit=1000,
         )
-        query = dict(top=34, by="volume")
-        response = await self.client.get(api_url, params=query)
-        symbols = [data.symbol for data in response.most_actives]
-        return symbols
+
+        bars = list()
+        next_token = True
+
+        count = 0
+        while next_token:
+            response = await self.client.get(api_url, params=query)
+            next_token = response.next_page_token
+            query["page_token"] = next_token
+
+            bars_data = getattr(response.bars, symbol)
+            count += 1
+            print("page", count, "has next", next_token, "and", len(bars_data), "bars")
+
+            bars.extend(Bar.from_alpaca(data) for data in bars_data)
+
+        return bars
 
 
 @dataclass

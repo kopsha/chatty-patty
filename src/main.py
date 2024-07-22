@@ -56,14 +56,8 @@ class Seeker:
         )
         await self.patty.say(message)
 
-        symbols = await self.alpaca.client.fetch_most_active()
-        message = "\n".join(
-            (
-                "Most active stocks",
-                *symbols,
-            )
-        )
-        await self.patty.say(message)
+        await self.alpaca.scan_most_active()
+
 
     async def on_stop(self):
         await self.alpaca.on_stop()

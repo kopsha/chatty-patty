@@ -2,8 +2,11 @@
 __pycache__/
 .venv
 
+data/
+out/
 *.dat
 *.png
+
 
 credentials.ini
 internals.ini

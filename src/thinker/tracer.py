@@ -12,10 +12,10 @@ import mplfinance as mpf
 import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.patches import Patch, Rectangle
-from metaflip import (
+from .metaflip import (
     FIBONACCI,
     HALF_DAY_CYCLE,
-    QUARTER_DAY_CYCLE,
+    FULL_CYCLE,
     CandleStick,
 )
 from ta.volatility import average_true_range
@@ -27,7 +27,7 @@ RenkoBrick = namedtuple("RenkoBrick", ["timestamp", "open", "close", "kind"])
 class PinkyTracker:
     """Keeps track of a single symbol"""
 
-    def __init__(self, symbol: str, wix: int = 6, maxlen: int = QUARTER_DAY_CYCLE):
+    def __init__(self, symbol: str, wix: int = 6, maxlen: int = FULL_CYCLE):
         self.symbol = symbol
         self.wix = wix  # WindowIndex
         self.maxlen = maxlen
@@ -43,7 +43,7 @@ class PinkyTracker:
         self.data.extend(CandleStick(**x) for x in data_points)
         self.price = self.data[-1].close
 
-        # TODO: maybe trigger some analysis
+        print("Updated", len(self.data), "datapoints.")
 
     @cached_property
     def window(self):
@@ -75,23 +75,23 @@ class PinkyTracker:
             close=df["close"],
             window=self.window,
         )
+        df["ar"] = df["high"] - df["low"]
+        df["mar"] = df["ar"].rolling(self.window).mean()
 
         return df
 
     def compute_renko_bricks(self, df: pd.DataFrame):
-        print(df["atr"].tail())
-        size = round(df["atr"].iloc[-1], 3)  # TODO: Find a smarter rounding
-        print(size)
+        precision = 3
+        size = round(df["mar"].max() / 2, precision)  # TODO: Find a smarter rounding
 
         first_open = df["open"].iloc[0]
         first_close = df["close"].iloc[0]
-
         if first_open < first_close:
-            renko_high = round(first_close, 2)
-            renko_low = min(round(first_open, 2), renko_high - size)
+            renko_high = round(first_close, precision)
+            renko_low = min(round(first_open, precision), renko_high - size)
         else:
-            renko_high = round(first_open, 2)
-            renko_low = min(round(first_close, 2), renko_high - size)
+            renko_high = round(first_open, precision)
+            renko_low = min(round(first_close, precision), renko_high - size)
 
         bricks = list()
         for row in df.itertuples():
@@ -166,31 +166,6 @@ class PinkyTracker:
 
         return events
 
-    def save_mpf_chart(self, df: pd.DataFrame, path: str, chart_type: str = "renko"):
-        mavs = sorted([10] + list(FIBONACCI[self.wix - 1 : self.wix + 1]))
-        fig, axes = mpf.plot(
-            df,
-            type=chart_type,
-            mav=mavs,
-            style="yahoo",
-            tight_layout=True,
-            xrotation=0,
-            figsize=(21, 13),
-            title=self.symbol,
-            volume=True,
-            returnfig=True,
-        )
-        axes[0].legend([self.symbol, *(f"SMA{x}" for x in mavs)])
-
-        for ax in axes:
-            ax.yaxis.tick_left()
-
-        filename = f"{self.symbol}-{chart_type}-mpf.png"
-        filepath = os.path.join(path, filename)
-        plt.savefig(filepath, bbox_inches="tight", dpi=300)
-        plt.close()
-        print("saved", filepath)
-
     def save_renko_chart(
         self, renko_df: pd.DataFrame, events: list, size: float, path: str, suffix: str
     ):
@@ -231,13 +206,16 @@ class PinkyTracker:
         major_ticks = list()
         major_labels = list()
         minor_ticks = list()
+        divider = len(timestamps) // 10
+        print(self.symbol, divider)
         for i, ts in enumerate(timestamps):
-            if i % 10 == 0:
+            if i % divider == 0:
                 major_ticks.append(i)
-                major_labels.append(ts.strftime("%H:%M"))
+                major_labels.append(ts.strftime("%b %d, %H:%M"))
             else:
                 minor_ticks.append(i)
 
+        print(len(major_labels))
         ax.set_xticks(major_ticks)
         ax.set_xticklabels(major_labels)
         ax.set_xticks(minor_ticks, minor=True)
@@ -253,7 +231,7 @@ class PinkyTracker:
             color = color_map[event]
             ax.axvline(x=i + 2, color=color, linestyle="--", linewidth=1, alpha=0.8)
             ax.text(
-                i + 1.75,
+                i + 2,
                 ax.get_ylim()[1] * 0.999,
                 event,
                 rotation=90,
@@ -261,12 +239,37 @@ class PinkyTracker:
                 color=color,
             )
 
-        up_patch = Patch(color="forestgreen", label=f"Up Brick ({size:.2f} $)")
-        down_patch = Patch(color="tomato", label=f"Down Brick ({size:.2f} $)")
-        window_patch = Patch(color="royalblue", label=f"ATR window {self.window}")
-        ax.legend(handles=[up_patch, down_patch, window_patch], loc="lower left")
+        up_patch = Patch(color="forestgreen", label=f"Size {size:.2f} $")
+        window_patch = Patch(color="royalblue", label=f"Range {self.window}")
+        ax.legend(handles=[up_patch, window_patch], loc="lower left")
 
         filename = f"{self.symbol}-renko-{suffix}.png"
+        filepath = os.path.join(path, filename)
+        plt.savefig(filepath, bbox_inches="tight", dpi=300)
+        plt.close()
+        print("saved", filepath)
+
+    def save_mpf_chart(self, df: pd.DataFrame, path: str, suffix: str, chart_type: str = "candle"):
+        half_df = df.tail(self.maxlen // 2)
+        fig, axes = mpf.plot(
+            half_df,
+            type=chart_type,
+            mav=[self.window],
+            style="yahoo",
+            tight_layout=True,
+            xrotation=0,
+            figsize=(21, 13),
+            title=self.symbol,
+            volume=True,
+            returnfig=True,
+        )
+
+        for ax in axes:
+            ax.yaxis.tick_left()
+
+        axes[0].legend([f"SMA{self.window}", self.symbol])
+
+        filename = f"{self.symbol}-{chart_type}-mpf-{suffix}.png"
         filepath = os.path.join(path, filename)
         plt.savefig(filepath, bbox_inches="tight", dpi=300)
         plt.close()
@@ -331,8 +334,11 @@ def digest_sample(filename: str):
 
 
 def main():
-    for sample in Path().glob("*.json"):
-        digest_sample(sample)
+    data_folder = Path(os.getenv("PRIVATE_CACHE"))
+    for sample in data_folder.glob("*.json"):
+        print(sample)
+        # digest_sample(sample)
+
     print("done")
 
 
