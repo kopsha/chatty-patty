@@ -3,7 +3,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from enum import StrEnum, auto
 from types import SimpleNamespace
-from typing import Optional, Self, Type, Union
+from typing import Optional, Self, Union
 from uuid import UUID
 
 from hasty import HastyClient
@@ -65,16 +65,22 @@ class AlpacaClient:
         response = await self.client.get(api_url)
         return response
 
-    async def fetch_orders(self):
+    async def fetch_orders(self, status="all"):
         api_url = self.API_ROOT.format(group="api", method="v2/orders")
         query = dict(
-            status="all",
+            status=status,
             limit=500,
-            direction="asc",
+            direction="desc",
         )
         response = await self.client.get(api_url, params=query)
-        orders = [from_alpaca(Cls=Order, data=data) for data in response]
+        orders = [Order.from_alpaca(data) for data in response]
         return orders
+
+    async def fetch_open_positions(self):
+        api_url = self.API_ROOT.format(group="api", method="v2/positions")
+        response = await self.client.get(api_url)
+        positions = [Position.from_alpaca(data) for data in response]
+        return positions
 
     async def find_watchlist(self, named: str):
         api_url = self.API_ROOT.format(group="api", method="v2/watchlists")
@@ -264,21 +270,38 @@ class Order:
     status: OrderStatus
 
     notional: Optional[Union[Decimal, str]] = None
-    qty: Optional[Union[int, str]] = None
-    filled_qty: Union[int, str] = 0
-    filled_avg_price: Optional[Union[Decimal, str]] = None
-    limit_price: Optional[Union[Decimal, str]] = None
-    stop_price: Optional[Union[Decimal, str]] = None
+    qty: Optional[int] = None
+    filled_qty: Union[int] = 0
+    filled_avg_price: Optional[Decimal] = None
+    limit_price: Optional[Decimal] = None
+    stop_price: Optional[Decimal] = None
     extended_hours: bool = False
-    trail_percent: Optional[Union[Decimal, str]] = None
-    trail_price: Optional[Union[Decimal, str]] = None
+
+    @classmethod
+    def from_alpaca(cls: Self, data: SimpleNamespace):
+        valid_fields = {f.name for f in fields(cls)}
+        valid_data = {k: v for k, v in vars(data).items() if k in valid_fields}
+        return cls(**valid_data)
 
 
-def from_alpaca(Cls: Type, data: dict):
-    """Create dataclass instance from data"""
-    valid_fields = {f.name for f in fields(Cls)}
-    valid_data = {k: v for k, v in data.items() if k in valid_fields}
-    return Cls(**valid_data)
+@dataclass
+class Position:
+    asset_id: UUID
+    symbol: str
+    side: str
+    qty: int
+    qty_available: int
+    market_value: Decimal
+    current_price: Decimal
+    lastday_price: Decimal
+    unrealized_pl: Decimal
+    unrealized_plpc: Decimal
+
+    @classmethod
+    def from_alpaca(cls: Self, data: SimpleNamespace):
+        valid_fields = {f.name for f in fields(cls)}
+        valid_data = {k: v for k, v in vars(data).items() if k in valid_fields}
+        return cls(**valid_data)
 
 
 if __name__ == "__main__":

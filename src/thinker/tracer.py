@@ -1,7 +1,6 @@
 import json
 import math
 import os
-import pytz
 from collections import deque, namedtuple
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -11,17 +10,13 @@ from types import SimpleNamespace
 
 import mplfinance as mpf
 import pandas as pd
+import pytz
 from matplotlib import pyplot as plt
 from matplotlib.patches import Patch, Rectangle
 from ta.volatility import average_true_range
 from ta.volume import on_balance_volume
 
-from .metaflip import (
-    FIBONACCI,
-    FULL_CYCLE,
-    CandleStick,
-    DataclassEncoder
-)
+from .metaflip import FIBONACCI, FULL_CYCLE, CandleStick, DataclassEncoder
 
 RenkoBrick = namedtuple("RenkoBrick", ["timestamp", "open", "close", "kind"])
 
@@ -36,7 +31,7 @@ class PinkyTracker:
         self.data: deque[CandleStick] = deque(maxlen=maxlen)
         self.price: Decimal = Decimal()
         self.pre_signal = None
-        self.last_timestamp = datetime.now(timezone.utc) - timedelta(days=31)
+        self.last_timestamp = datetime.now(timezone.utc) - timedelta(days=100)
 
     def feed(self, data_points: list[dict]):
         self.data.extend(CandleStick(**x) for x in data_points)
@@ -69,7 +64,7 @@ class PinkyTracker:
         with open(filepath, "wt") as datafile:
             data = list(self.data)
             datafile.write(json.dumps(data, indent=4, cls=DataclassEncoder))
-        print(f"Saved to {self.symbol} to {filepath}")
+        print(f"Wrote {len(self.data)} data points to {self.symbol} to {filepath}")
 
     @cached_property
     def window(self):
@@ -193,7 +188,7 @@ class PinkyTracker:
         return events
 
     def save_renko_chart(
-        self, renko_df: pd.DataFrame, events: list, size: float, path: str, suffix: str
+        self, renko_df: pd.DataFrame, events: list, size: float, path: str
     ):
         fig, ax = plt.subplots(figsize=(21, 13))
 
@@ -233,7 +228,6 @@ class PinkyTracker:
         major_labels = list()
         minor_ticks = list()
         divider = len(timestamps) // 10
-        print(self.symbol, divider)
         for i, ts in enumerate(timestamps):
             if i % divider == 0:
                 major_ticks.append(i)
@@ -241,7 +235,6 @@ class PinkyTracker:
             else:
                 minor_ticks.append(i)
 
-        print(len(major_labels))
         ax.set_xticks(major_ticks)
         ax.set_xticklabels(major_labels)
         ax.set_xticks(minor_ticks, minor=True)
@@ -269,7 +262,7 @@ class PinkyTracker:
         window_patch = Patch(color="royalblue", label=f"Range {self.window}")
         ax.legend(handles=[up_patch, window_patch], loc="lower left")
 
-        filename = f"{self.symbol}-renko-{suffix}.png"
+        filename = f"{self.symbol}-renko-{self.maxlen}p.png"
         filepath = os.path.join(path, filename)
         plt.savefig(filepath, bbox_inches="tight", dpi=300)
         plt.close()
