@@ -1,25 +1,27 @@
 import json
 import math
 import os
+import pytz
 from collections import deque, namedtuple
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from functools import cached_property
-from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import mplfinance as mpf
 import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.patches import Patch, Rectangle
-from .metaflip import (
-    FIBONACCI,
-    HALF_DAY_CYCLE,
-    FULL_CYCLE,
-    CandleStick,
-)
 from ta.volatility import average_true_range
 from ta.volume import on_balance_volume
+
+from .metaflip import (
+    FIBONACCI,
+    FULL_CYCLE,
+    CandleStick,
+    DataclassEncoder
+)
 
 RenkoBrick = namedtuple("RenkoBrick", ["timestamp", "open", "close", "kind"])
 
@@ -34,16 +36,40 @@ class PinkyTracker:
         self.data: deque[CandleStick] = deque(maxlen=maxlen)
         self.price: Decimal = Decimal()
         self.pre_signal = None
+        self.last_timestamp = datetime.now(timezone.utc) - timedelta(days=31)
 
     def feed(self, data_points: list[dict]):
-        if not data_points:
-            print("Provided feed seems empty, skipped.")
-            return
-
         self.data.extend(CandleStick(**x) for x in data_points)
-        self.price = self.data[-1].close
+        if self.data:
+            self.price = self.data[-1].close
 
         print("Updated", len(self.data), "datapoints.")
+
+    def read_from(self, cache: Path):
+        filepath = cache / f"{self.symbol}-{self.maxlen}p.json"
+        if not filepath.exists():
+            print(f"Symbol {self.symbol} has no cached data")
+            return
+
+        with open(filepath, "rt") as datafile:
+            data_points = json.loads(datafile.read())
+        print(f"Read {self.symbol} from {filepath}")
+
+        ts = datetime.utcfromtimestamp(data_points[-1]["timestamp"])
+        self.last_timestamp = pytz.utc.localize(ts)
+
+        self.feed(data_points)
+
+    def write_to(self, cache: Path):
+        if not self.data:
+            print("Nothing to write")
+            return
+
+        filepath = cache / f"{self.symbol}-{self.maxlen}p.json"
+        with open(filepath, "wt") as datafile:
+            data = list(self.data)
+            datafile.write(json.dumps(data, indent=4, cls=DataclassEncoder))
+        print(f"Saved to {self.symbol} to {filepath}")
 
     @cached_property
     def window(self):
@@ -249,7 +275,9 @@ class PinkyTracker:
         plt.close()
         print("saved", filepath)
 
-    def save_mpf_chart(self, df: pd.DataFrame, path: str, suffix: str, chart_type: str = "candle"):
+    def save_mpf_chart(
+        self, df: pd.DataFrame, path: str, suffix: str, chart_type: str = "candle"
+    ):
         half_df = df.tail(self.maxlen // 2)
         fig, axes = mpf.plot(
             half_df,
