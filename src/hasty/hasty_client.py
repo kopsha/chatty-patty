@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from typing import Any
 
 import certifi
-from aiohttp import ClientSession, TCPConnector
+from aiohttp import ClientSession, FormData, TCPConnector
 
 
 class HastyClient:
@@ -36,13 +36,22 @@ class HastyClient:
         )
 
     async def _rest_call(
-        self, verb: str, api_url: str, params: dict = {}, data: dict = {}
+        self,
+        verb: str,
+        api_url: str,
+        params: dict | None = None,
+        data: dict | None = None,
+        form_data: FormData | None = None,
     ) -> SimpleNamespace | list[SimpleNamespace]:
         """Invokes selected session method"""
         session_verb = self._session_call_map[verb]
 
         async with session_verb(
-            api_url, params=params, json=data or None, raise_for_status=True
+            api_url,
+            params=params,
+            json=data,
+            data=form_data,
+            raise_for_status=True,
         ) as response:
             response_data = await response.json()
 

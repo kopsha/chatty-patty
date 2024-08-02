@@ -69,6 +69,7 @@ class AlpacaScavenger:
 
     async def update_positions(self):
         positions = await self.client.fetch_open_positions()
+        print(".", end="")
 
         news = list()
         for pos in positions:
@@ -79,9 +80,10 @@ class AlpacaScavenger:
                 tracker = self.trackers[pos.symbol]
 
             await self.update_tracker(tracker)
-            event, is_new = self.strategic_run(tracker)
+            print(".", end="")
+            event, is_new, image = self.strategic_run(tracker)
             if is_new:
-                news.append((tracker.symbol, event))
+                news.append((tracker.symbol, event, image))
 
         return news
 
@@ -99,7 +101,6 @@ class AlpacaScavenger:
         if (self.market_clock.is_open and (delta >= timedelta(minutes=30))) or (
             not self.market_clock.is_open and (delta >= timedelta(hours=16))
         ):
-            print(f"Fetching most recent data for {tracker.symbol}, reason:", delta)
             bars = await self.client.fetch_bars(tracker.symbol, since)
             tracker.feed(map(asdict, bars))
             tracker.write_to(self.CACHE)
@@ -107,15 +108,15 @@ class AlpacaScavenger:
     def strategic_run(self, tracker: PinkyTracker):
         df = tracker.make_indicators()
         renko_df, size = tracker.compute_renko_bricks(df)
-        # print(tracker.symbol, "brick size:", size)
 
         events, is_new = tracker.run_mariashi_strategy(renko_df)
-
         if is_new:
             charts_path = os.getenv("OUTPUTS_PATH", "charts")
-            tracker.save_renko_chart(renko_df, events, size, path=charts_path)
+            image = tracker.save_renko_chart(renko_df, events, size, path=charts_path)
+        else:
+            image = None
 
-        return tracker.last_event, is_new
+        return tracker.last_event, is_new, image
 
     @cached_property
     def known_commands(self):

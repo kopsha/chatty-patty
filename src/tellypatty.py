@@ -1,7 +1,9 @@
 import os
 import pickle
+from pathlib import Path
 from types import SimpleNamespace
 
+from aiohttp import FormData
 from hasty import HastyClient
 
 
@@ -79,15 +81,24 @@ class TellyPatty:
 
     async def say(self, message):
         api_url = self.API_ROOT.format(token=self.token, method="sendMessage")
-        query = dict(
+        payload = dict(
             chat_id=self.chat_id,
             text=message,
             parse_mode="markdown",
             disable_web_page_preview="true",
         )
-        response = await self.client.get(api_url, params=query)
+        response = await self.client.get(api_url, data=payload)
         assert hasattr(
             response, "ok"
         ), f"getUpdates failed with {response.error_code}, {response.description}"
 
+        return response
+
+    async def selfie(self, picture: Path):
+        api_url = self.API_ROOT.format(token=self.token, method="sendPhoto")
+        with open(picture, "rb") as image_file:
+            form = FormData()
+            form.add_field("chat_id", str(self.chat_id))
+            form.add_field("photo", image_file)
+            response = await self.client.post(api_url, form_data=form)
         return response

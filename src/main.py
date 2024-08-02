@@ -17,6 +17,7 @@ CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", "credentials.ini")
 ERR_TOLERANCE = 3
 ISATTY = sys.stdout.isatty()
 
+
 def error_resilient(fn):
     @wraps(fn)
     async def wrapper(self, *args, **kwargs):
@@ -26,12 +27,14 @@ def error_resilient(fn):
             await self._stop_all_tasks()
         except Exception as err:
             self.err_count += 1
+            print(flush=True)
             print("ERROR", self.err_count, "::", repr(err))
 
             if self.err_count >= ERR_TOLERANCE:
                 await self._stop_all_tasks()
 
     return wrapper
+
 
 @asynccontextmanager
 async def pretty_go(message):
@@ -42,6 +45,7 @@ async def pretty_go(message):
         print("[ok]")
     except Exception as e:
         print("[failed]", e)
+
 
 class Seeker:
     def __init__(self, credentials):
@@ -90,15 +94,12 @@ class Seeker:
         print(":", end="", flush=True)
 
         news = await self.alpaca.update_positions()
+        print(".", end="")
 
-        if news:
-            message = "\n".join(
-                (
-                    "Something happened",
-                    *(f"{symbol} > {event} <" for symbol, event in news),
-                )
-            )
+        for symbol, event, image in news:
+            message = f"{symbol} > {event} <"
             await self.patty.say(message)
+            await self.patty.selfie(image)
 
     @error_resilient
     async def background_task(self):
@@ -163,6 +164,8 @@ class Seeker:
             self.scheduler.start()
 
         print("> running")
+        await self.hourly()
+        await self.fast_task()
         await task
 
         async with pretty_go("shutdown"):

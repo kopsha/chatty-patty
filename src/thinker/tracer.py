@@ -39,7 +39,8 @@ class PinkyTracker:
         if self.data:
             self.price = self.data[-1].close
 
-        print("Updated", len(self.data), "datapoints.")
+        ts = datetime.utcfromtimestamp(self.data[-1].timestamp)
+        self.last_timestamp = pytz.utc.localize(ts)
 
     def read_from(self, cache: Path):
         filepath = cache / f"{self.symbol}-{self.maxlen}p.json"
@@ -49,10 +50,6 @@ class PinkyTracker:
 
         with open(filepath, "rt") as datafile:
             data_points = json.loads(datafile.read())
-        print(f"Read {self.symbol} from {filepath}")
-
-        ts = datetime.utcfromtimestamp(data_points[-1]["timestamp"])
-        self.last_timestamp = pytz.utc.localize(ts)
 
         self.feed(data_points)
 
@@ -65,7 +62,6 @@ class PinkyTracker:
         with open(filepath, "wt") as datafile:
             data = list(self.data)
             datafile.write(json.dumps(data, indent=4, cls=DataclassEncoder))
-        print(f"Wrote {len(self.data)} data points to {self.symbol} to {filepath}")
 
     @cached_property
     def window(self):
@@ -270,7 +266,8 @@ class PinkyTracker:
         filepath = os.path.join(path, filename)
         plt.savefig(filepath, bbox_inches="tight", dpi=300)
         plt.close()
-        print("saved", filepath)
+
+        return filepath
 
     def save_mpf_chart(
         self, df: pd.DataFrame, path: str, suffix: str, chart_type: str = "candle"
@@ -298,7 +295,6 @@ class PinkyTracker:
         filepath = os.path.join(path, filename)
         plt.savefig(filepath, bbox_inches="tight", dpi=300)
         plt.close()
-        print("saved", filepath)
 
 
 def to_namespace(data):

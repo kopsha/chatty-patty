@@ -154,10 +154,8 @@ class AlpacaClient:
             query["page_token"] = next_token
 
             bars_data = getattr(response.bars, symbol)
-            count += 1
-            print("page", count, "has next", next_token, "and", len(bars_data), "bars")
-
             bars.extend(Bar.from_alpaca(data) for data in bars_data)
+            count += 1
 
         return bars
 
@@ -300,7 +298,9 @@ class Position:
     @classmethod
     def from_alpaca(cls: Self, data: SimpleNamespace):
         valid_fields = {f.name: f.type for f in fields(cls)}
-        valid_data = {k: valid_fields[k](v) for k, v in vars(data).items() if k in valid_fields}
+        valid_data = {
+            k: valid_fields[k](v) for k, v in vars(data).items() if k in valid_fields
+        }
         return cls(**valid_data)
 
 
