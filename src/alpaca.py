@@ -1,13 +1,14 @@
 import json
 import os
-from typing import Any
 from dataclasses import asdict, is_dataclass
+from datetime import datetime, timedelta, timezone
 from functools import cached_property
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 from alpaca_client import AlpacaClient, Bar
-from thinker import PinkyTracker
+from thinker import FAST_CYCLE, FULL_CYCLE, PinkyTracker
 
 
 class DataclassEncoder(json.JSONEncoder):
@@ -24,9 +25,9 @@ class AlpacaScavenger:
         self.client = AlpacaClient(api_key, secret)
 
         self.watchlist = SimpleNamespace(name="Hidden Multiplier", symbols=set())
-        self.quotes = dict()
         self.account = None
-        self.is_market_open = False
+        self.market_clock = None
+        self.trackers = dict()
 
     async def on_start(self):
         await self.client.on_start()
@@ -35,18 +36,17 @@ class AlpacaScavenger:
         await self.update_market_clock()
         await self.pull_watchlist()
 
-    async def update_market_clock(self):
-        response = await self.client.fetch_market_clock()
-        self.is_market_open = response.is_open
-
     async def on_stop(self):
         await self.client.on_stop()
+
+    async def update_market_clock(self):
+        self.market_clock = await self.client.fetch_market_clock()
 
     def as_opening_str(self) -> str:
         flat_watchlist = ",".join(self.watchlist.symbols) or "(empty)"
         return "\n".join(
             (
-                f"- market is open: {self.is_market_open}",
+                f"- market is open: {self.market_clock.is_open}",
                 f"- equity: {self.account.equity:.2f} $",
                 f"- portfolio: {self.account.portfolio_value:.2f} $",
                 f"- cash: {self.account.cash:.2f} $ / {self.account.buying_power:.2f} $",
@@ -63,69 +63,58 @@ class AlpacaScavenger:
         watchlist = await self.client.fetch_watchlist(named=self.watchlist.name)
         for ass in watchlist.assets:
             self.watchlist.symbols.add(ass.symbol)
-            self.quotes[ass.symbol] = dict()
 
     async def push_watchlist(self):
         await self.client.update_watchlist(self.watchlist.name, self.watchlist.symbols)
 
-    async def watch(self):
-        has_changed = list()
+    async def update_positions(self):
+        positions = await self.client.fetch_open_positions()
 
-        if self.is_market_open:
-            watchlist = self.watchlist.symbols
-        elif any(bool(x) is False for x in self.quotes.values()):
-            # NOTE: market is closed but we miss some values
-            watchlist = self.watchlist.symbols
-        else:
-            watchlist = []
-
-        if watchlist:
-            quotes = await self.client.fetch_quotes(watchlist)
-            for current in quotes:
-                previous = self.quotes.get(current.symbol, [])
-                if current != previous:
-                    has_changed.append(current.symbol)
-                    self.quotes[current.symbol] = current
-
-        return has_changed
-
-    async def scan_most_active(self):
-        active_symbols = await self.client.fetch_most_active(limit=13)
-
-        print("Most active symbols", active_symbols)
-
-        all_bars = dict()
-        for symbol in active_symbols:
-            # attempt to read from local cache
-            filepath = self.CACHE / f"{symbol}-1h.json"
-
-            if filepath.exists():
-                with open(filepath, "rt") as datafile:
-                    bars_data = json.loads(datafile.read())
-                    bars = [Bar.from_json(data) for data in bars_data]
-                print("loaded from cache", filepath)
+        news = list()
+        for pos in positions:
+            if pos.symbol not in self.trackers:
+                tracker = self.make_tracker(pos.symbol)
+                self.trackers[pos.symbol] = tracker
             else:
-                bars = await self.client.fetch_bars(symbol)
-                with open(filepath, "wt") as datafile:
-                    datafile.write(json.dumps(bars, indent=4, cls=DataclassEncoder))
-                print("saved to cache", filepath)
+                tracker = self.trackers[pos.symbol]
 
-            all_bars[symbol] = bars
+            await self.update_tracker(tracker)
+            event, is_new = self.strategic_run(tracker)
+            if is_new:
+                news.append((tracker.symbol, event))
 
-        print("retrieved", len(all_bars), "charts data")
-        for symbol, bars in all_bars.items():
-            tracer = PinkyTracker(symbol=symbol, wix=5)
+        return news
 
-            tracer.feed(map(asdict, bars))
-            df = tracer.make_indicators()
+    def make_tracker(self, symbol: str, cycle=FULL_CYCLE) -> PinkyTracker:
+        tracker = PinkyTracker(symbol=symbol, wix=5, maxlen=cycle)
+        tracker.read_from(self.CACHE)
+        return tracker
 
-            renko_df, size = tracer.compute_renko_bricks(df)
-            events = tracer.run_mariashi_strategy(renko_df)
+    async def update_tracker(self, tracker: PinkyTracker):
+        now = datetime.now(timezone.utc)
+        a_month_ago = now - timedelta(days=90)
+        since = max(tracker.last_timestamp, a_month_ago)
+        delta = now - since
 
-            charts_path = os.getenv("OUTPUTS_PATH", "charts")
-            tracer.save_renko_chart(renko_df, events, size, path=charts_path, suffix="1h")
-            # tracer.save_mpf_chart(df, path=charts_path, suffix="1h")
-            # tracer.save_mpf_chart(df, path=charts_path, suffix="1h", chart_type="renko")
+        if (self.market_clock.is_open and (delta >= timedelta(minutes=30))) or (
+            not self.market_clock.is_open and (delta >= timedelta(hours=16))
+        ):
+            print(f"Fetching most recent data for {tracker.symbol}, reason:", delta)
+            bars = await self.client.fetch_bars(tracker.symbol, since)
+            tracker.feed(map(asdict, bars))
+            tracker.write_to(self.CACHE)
+
+    def strategic_run(self, tracker: PinkyTracker):
+        df = tracker.make_indicators()
+        renko_df, size = tracker.compute_renko_bricks(df)
+        # print(tracker.symbol, "brick size:", size)
+
+        events, is_new = tracker.run_mariashi_strategy(renko_df)
+
+        # charts_path = os.getenv("OUTPUTS_PATH", "charts")
+        # tracer.save_renko_chart(renko_df, events, size, path=charts_path)
+
+        return tracker.last_event, is_new
 
     @cached_property
     def known_commands(self):

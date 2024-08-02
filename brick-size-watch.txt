@@ -1,0 +1,8 @@
+Most active symbols ['NCNC', 'SERV']
+Read NCNC from /app/data/NCNC-900p.json
+Updated 107 datapoints.
+NCNC brick size 0.015
+Read SERV from /app/data/SERV-900p.json
+Updated 579 datapoints.
+SERV brick size 0.859
+

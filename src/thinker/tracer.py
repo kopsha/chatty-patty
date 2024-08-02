@@ -32,6 +32,7 @@ class PinkyTracker:
         self.price: Decimal = Decimal()
         self.pre_signal = None
         self.last_timestamp = datetime.now(timezone.utc) - timedelta(days=100)
+        self.last_event = None
 
     def feed(self, data_points: list[dict]):
         self.data.extend(CandleStick(**x) for x in data_points)
@@ -185,7 +186,10 @@ class PinkyTracker:
 
             previous_side = side
 
-        return events
+        has_changed = events[-1][1] != self.last_event
+        self.last_event = events[-1][1]
+
+        return events, has_changed
 
     def save_renko_chart(
         self, renko_df: pd.DataFrame, events: list, size: float, path: str

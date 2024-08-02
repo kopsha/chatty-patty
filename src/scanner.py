@@ -18,29 +18,33 @@ async def main(credentials):
     a_client = AlpacaClient(**credentials["alpaca"])
     await a_client.on_start()
     market_clock = await a_client.fetch_market_clock()
+    print(market_clock)
 
-    await digest_orders(a_client)
-    # # get most active stocks
-    # active_symbols = await a_client.fetch_most_active(limit=21)
-    # print("Most active symbols", active_symbols)
-    #
-    # # pick first
-    # assert active_symbols
-    # for symbol in active_symbols:
-    #     await analyze(symbol, a_client, market_clock)
+    # await digest_orders(a_client)
+
+    active_symbols = await a_client.fetch_most_active(limit=21)
+    active_symbols = ["NCNC", "SERV"]
+    print("Most active symbols", active_symbols)
+
+    for symbol in active_symbols:
+        await analyze(symbol, a_client, market_clock)
 
     await a_client.on_stop()
     print("gone")
 
+
 async def digest_orders(client: AlpacaClient):
-    pos = await client.fetch_open_positions()
-    print(pos)
+    positions = await client.fetch_open_positions()
+    for pos in positions:
+        print(
+            f"{pos.symbol}, {pos.market_value:8.2f}, {pos.current_price:8.2f}, {pos.unrealized_pl:8.2f} $, {pos.unrealized_plpc*100:5.2f} %"
+        )
     # orders = await client.fetch_orders("open")
     # for order in orders:
     #     print("-", order.side, order.symbol, order.status, order.qty)
 
 
-async def analyze(symbol, client, market_clock, cycle=FULL_CYCLE):
+async def analyze(symbol, client: AlpacaClient, market_clock, cycle=FULL_CYCLE):
     tracer = PinkyTracker(symbol=symbol, wix=5, maxlen=cycle)
     tracer.read_from(CACHE)
 
@@ -50,7 +54,7 @@ async def analyze(symbol, client, market_clock, cycle=FULL_CYCLE):
     delta = now - since
 
     if (market_clock.is_open and delta >= timedelta(minutes=30)) or (
-        not market_clock.is_open and delta >= timedelta(days=2)
+        not market_clock.is_open and delta >= timedelta(hours=12)
     ):
         print("Fetching most recent data, reason:", delta)
         bars = await client.fetch_bars(symbol, since)
@@ -60,6 +64,7 @@ async def analyze(symbol, client, market_clock, cycle=FULL_CYCLE):
 
     df = tracer.make_indicators()
     renko_df, size = tracer.compute_renko_bricks(df)
+    print(symbol, "brick size", size)
     events = tracer.run_mariashi_strategy(renko_df)
 
     charts_path = os.getenv("OUTPUTS_PATH", "charts")

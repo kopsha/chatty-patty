@@ -299,8 +299,8 @@ class Position:
 
     @classmethod
     def from_alpaca(cls: Self, data: SimpleNamespace):
-        valid_fields = {f.name for f in fields(cls)}
-        valid_data = {k: v for k, v in vars(data).items() if k in valid_fields}
+        valid_fields = {f.name: f.type for f in fields(cls)}
+        valid_data = {k: valid_fields[k](v) for k, v in vars(data).items() if k in valid_fields}
         return cls(**valid_data)
 
 

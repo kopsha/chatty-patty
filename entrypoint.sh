@@ -11,6 +11,7 @@ main()
             exit 1
             ;;
         shell)
+            cd src
             bash
             ;;
         selfcheck)

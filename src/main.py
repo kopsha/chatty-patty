@@ -11,7 +11,7 @@ from tellypatty import TellyPatty
 from yfapi_client import YahooFinanceClient
 
 CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", "credentials.ini")
-ERR_TOLERANCE = 1
+ERR_TOLERANCE = 3
 
 
 def error_resilient(fn):
@@ -19,6 +19,8 @@ def error_resilient(fn):
     async def wrapper(self, *args, **kwargs):
         try:
             return await fn(self, *args, **kwargs)
+        except asyncio.CancelledError as err:
+            await self._stop_all_tasks()
         except Exception as err:
             self.err_count += 1
             print("ERROR", self.err_count, "::", repr(err))
@@ -35,18 +37,22 @@ class Seeker:
         self.keep_running = False
         self.scheduler = AsyncIOScheduler()
 
-        self.yfapi = YahooFinanceClient(**credentials["yahoofinance"])
+        # self.yfapi = YahooFinanceClient(**credentials["yahoofinance"])
         self.alpaca = AlpacaScavenger(**credentials["alpaca"])
         self.patty = TellyPatty(
             **credentials["telegram"],
             command_set=self.alpaca.known_commands,
         )
 
+    def on_interrupt(self, number, frame):
+        print()
+        print("\t [received shutdown signal]")
+        asyncio.create_task(self._stop_all_tasks())
+
     async def on_start(self):
         await self.patty.on_start()
-        await self.yfapi.on_start()
+        # await self.yfapi.on_start()
         await self.alpaca.on_start()
-        await self.alpaca.client.fetch_market_clock()
 
         message = "\n".join(
             (
@@ -56,28 +62,33 @@ class Seeker:
         )
         await self.patty.say(message)
 
-        await self.alpaca.scan_most_active()
-
+        # await self.alpaca.scan_most_active()
 
     async def on_stop(self):
         await self.alpaca.on_stop()
-        await self.yfapi.on_stop()
+        # await self.yfapi.on_stop()
 
         await self.patty.say("Telepathy channel is closed.")
         await self.patty.on_stop()
 
     @error_resilient
     async def fast_task(self):
-        print(".", end="", flush=True)
+        print(":", end="", flush=True)
 
-        changed_symbols = await self.alpaca.watch()
-        for symbol in changed_symbols:
-            msg = str(self.alpaca.quotes[symbol])
-            await self.patty.say(msg)
+        news = await self.alpaca.update_positions()
+
+        if news:
+            message = "\n".join(
+                (
+                    "Something happened",
+                    *(f"{symbol} > {event} <" for symbol, event in news),
+                )
+            )
+            await self.patty.say(message)
 
     @error_resilient
     async def background_task(self):
-        print(":", end="", flush=True)
+        print(".", end="", flush=True)
 
         data = await self.patty.get_updates(timeout=34)
         commands, system_commands, errors = self.patty.digest_updates(data)
@@ -126,17 +137,13 @@ class Seeker:
         print("initializing...")
 
         await self._open_session()
-        self.scheduler.add_job(self.fast_task, "interval", seconds=2)
+        self.scheduler.add_job(self.fast_task, "interval", minutes=5)
         self.scheduler.add_job(self.hourly, "interval", hours=1)
         self.scheduler.start()
 
         task = asyncio.create_task(self._loop())
-        try:
-            print("starting main task")
-            await task
-        except Exception as err:
-            print()
-            print("interrupted by", err)
+        print("starting main task")
+        await task
 
         print("shutting down...")
         if self.scheduler.running:
@@ -170,4 +177,8 @@ def read_credentials():
 if __name__ == "__main__":
     credentials = read_credentials()
     seeker = Seeker(credentials)
-    asyncio.run(seeker.main())
+
+    try:
+        asyncio.run(seeker.main())
+    except KeyboardInterrupt:
+        print("Can we stop nicely?")
