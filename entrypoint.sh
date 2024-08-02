@@ -22,7 +22,7 @@ main()
             exec python src/main.py
             ;;
         develop)
-            printf "\t..: Starting the main service\n"
+            printf "\t..: Starting the development loop\n"
             find src -name "*.py" | exec entr -rc python src/main.py
             ;;
         *)
@@ -32,5 +32,5 @@ main()
     esac
 }
 
-printf "\t..: Initializing $VERSION version on $CONTEXT\n"
+printf "\t..: Preparing $VERSION version on $CONTEXT\n"
 main "$@"

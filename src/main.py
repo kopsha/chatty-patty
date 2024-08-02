@@ -2,9 +2,11 @@
 
 import asyncio
 import os
+import sys
 from configparser import ConfigParser
-from functools import partial, wraps
+from functools import wraps
 from signal import SIGINT, SIGTERM
+from contextlib import asynccontextmanager
 
 from alpaca import AlpacaScavenger
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -13,7 +15,7 @@ from yfapi_client import YahooFinanceClient
 
 CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", "credentials.ini")
 ERR_TOLERANCE = 3
-
+ISATTY = sys.stdout.isatty()
 
 def error_resilient(fn):
     @wraps(fn)
@@ -31,6 +33,15 @@ def error_resilient(fn):
 
     return wrapper
 
+@asynccontextmanager
+async def pretty_go(message):
+    cols, _ = os.get_terminal_size() if ISATTY else (80, 0)
+    print(f"> {message:{cols - 10}}", flush=True, end="")
+    try:
+        yield
+        print("[ok]")
+    except Exception as e:
+        print("[failed]", e)
 
 class Seeker:
     def __init__(self, credentials):
@@ -50,7 +61,7 @@ class Seeker:
         print()
         print("\t..: Received shutdown signal")
         self.keep_running = False
-        self.scheduler.shutdown()
+        self.scheduler.shutdown(wait=False)
 
     async def on_start(self):
         await self.patty.on_start()
@@ -93,7 +104,7 @@ class Seeker:
     async def background_task(self):
         print(".", end="", flush=True)
 
-        data = await self.patty.get_updates(timeout=8)
+        data = await self.patty.get_updates(timeout=13)
         commands, system_commands, errors = self.patty.digest_updates(data)
 
         if errors:
@@ -137,28 +148,27 @@ class Seeker:
         self.scheduler.shutdown()
 
     async def main(self):
-        print("initializing...")
+        async with pretty_go("install signal handlers"):
+            loop = asyncio.get_running_loop()
+            for sign in (SIGTERM, SIGINT):
+                loop.add_signal_handler(sign, self.asked_to_stop)
 
-        loop = asyncio.get_running_loop()
-        for sign in (SIGTERM, SIGINT):
-            loop.add_signal_handler(sign, self.asked_to_stop)
+        async with pretty_go("create tcp sessions"):
+            await self._open_session()
 
-        await self._open_session()
-        self.scheduler.add_job(self.fast_task, "interval", minutes=5)
-        self.scheduler.add_job(self.hourly, "interval", hours=1)
-        self.scheduler.start()
+        async with pretty_go("setup async tasks"):
+            self.scheduler.add_job(self.fast_task, "interval", minutes=5)
+            self.scheduler.add_job(self.hourly, "interval", hours=1)
+            task = asyncio.create_task(self._loop())
+            self.scheduler.start()
 
-        task = asyncio.create_task(self._loop())
-        print("starting main task")
+        print("> running")
         await task
 
-        print("shutting down...")
-        if self.scheduler.running:
-            self.scheduler.shutdown()
-
-        await self._close_session()
-
-        print("main task was gracefully stopped")
+        async with pretty_go("shutdown"):
+            await self._close_session()
+            if self.scheduler.running:
+                self.scheduler.shutdown()
 
 
 def read_credentials():
@@ -184,8 +194,4 @@ def read_credentials():
 if __name__ == "__main__":
     credentials = read_credentials()
     seeker = Seeker(credentials)
-
-    try:
-        asyncio.run(seeker.main())
-    except KeyboardInterrupt:
-        print("Can we stop nicely?")
+    asyncio.run(seeker.main())
