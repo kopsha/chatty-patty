@@ -3,7 +3,8 @@
 import asyncio
 import os
 from configparser import ConfigParser
-from functools import wraps
+from functools import partial, wraps
+from signal import SIGINT, SIGTERM
 
 from alpaca import AlpacaScavenger
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -36,6 +37,7 @@ class Seeker:
         self.err_count = int()
         self.keep_running = False
         self.scheduler = AsyncIOScheduler()
+        self.tasks = list()
 
         # self.yfapi = YahooFinanceClient(**credentials["yahoofinance"])
         self.alpaca = AlpacaScavenger(**credentials["alpaca"])
@@ -44,10 +46,11 @@ class Seeker:
             command_set=self.alpaca.known_commands,
         )
 
-    def on_interrupt(self, number, frame):
+    def asked_to_stop(self):
         print()
-        print("\t [received shutdown signal]")
-        asyncio.create_task(self._stop_all_tasks())
+        print("\t..: Received shutdown signal")
+        self.keep_running = False
+        self.scheduler.shutdown()
 
     async def on_start(self):
         await self.patty.on_start()
@@ -90,7 +93,7 @@ class Seeker:
     async def background_task(self):
         print(".", end="", flush=True)
 
-        data = await self.patty.get_updates(timeout=34)
+        data = await self.patty.get_updates(timeout=8)
         commands, system_commands, errors = self.patty.digest_updates(data)
 
         if errors:
@@ -135,6 +138,10 @@ class Seeker:
 
     async def main(self):
         print("initializing...")
+
+        loop = asyncio.get_running_loop()
+        for sign in (SIGTERM, SIGINT):
+            loop.add_signal_handler(sign, self.asked_to_stop)
 
         await self._open_session()
         self.scheduler.add_job(self.fast_task, "interval", minutes=5)

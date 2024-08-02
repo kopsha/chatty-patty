@@ -19,11 +19,11 @@ main()
             ;;
         start)
             printf "\t..: Starting the main service\n"
-            python src/main.py
+            exec python src/main.py
             ;;
         develop)
             printf "\t..: Starting the main service\n"
-            find src -name "*.py" | entr -rc python src/main.py
+            find src -name "*.py" | exec entr -rc python src/main.py
             ;;
         *)
             printf "\t..: Invoking '$@'\n"

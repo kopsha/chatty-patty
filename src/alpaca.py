@@ -111,8 +111,9 @@ class AlpacaScavenger:
 
         events, is_new = tracker.run_mariashi_strategy(renko_df)
 
-        # charts_path = os.getenv("OUTPUTS_PATH", "charts")
-        # tracer.save_renko_chart(renko_df, events, size, path=charts_path)
+        if is_new:
+            charts_path = os.getenv("OUTPUTS_PATH", "charts")
+            tracker.save_renko_chart(renko_df, events, size, path=charts_path)
 
         return tracker.last_event, is_new
 
