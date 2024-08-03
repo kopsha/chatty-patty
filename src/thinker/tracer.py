@@ -74,7 +74,7 @@ class PinkyTracker:
     def window(self):
         return FIBONACCI[self.wix]
 
-    def make_indicators(self) -> pd.DataFrame:
+    def analyze(self) -> pd.DataFrame:
         if not self.data:
             print("Cannot analyze anything, data feed is empty.")
             return pd.DataFrame()
@@ -103,20 +103,22 @@ class PinkyTracker:
         df["ar"] = df["high"] - df["low"]
         df["mar"] = df["ar"].rolling(self.window).mean()
 
+        self.precision = 3
+        self.brick_size = round(df["mar"].max() / 2, self.precision)
+
         return df
 
-    def compute_renko_bricks(self, df: pd.DataFrame):
-        precision = 3
-        size = round(df["mar"].max() / 2, precision)  # TODO: Find a smarter rounding
+    def compute_renko_data(self, df: pd.DataFrame):
+        size = self.brick_size
 
         first_open = df["open"].iloc[0]
         first_close = df["close"].iloc[0]
         if first_open < first_close:
-            renko_high = round(first_close, precision)
-            renko_low = min(round(first_open, precision), renko_high - size)
+            renko_high = round(first_close, self.precision)
+            renko_low = min(round(first_open, self.precision), renko_high - size)
         else:
-            renko_high = round(first_open, precision)
-            renko_low = min(round(first_close, precision), renko_high - size)
+            renko_high = round(first_open, self.precision)
+            renko_low = min(round(first_close, self.precision), renko_high - size)
 
         bricks = list()
         for row in df.itertuples():
@@ -137,7 +139,7 @@ class PinkyTracker:
                     renko_low -= size
                     bricks.append(new_brick)
 
-        return pd.DataFrame(bricks), size
+        return pd.DataFrame(bricks)
 
     def run_mariashi_strategy(self, renko_df: pd.DataFrame):
         def zone_log(x: int):
@@ -194,9 +196,7 @@ class PinkyTracker:
 
         return events, has_changed
 
-    def save_renko_chart(
-        self, renko_df: pd.DataFrame, events: list, size: float, path: str
-    ):
+    def save_renko_chart(self, renko_df: pd.DataFrame, events: list, path: str):
         fig, ax = plt.subplots(figsize=(21, 13))
 
         timestamps = list()
@@ -265,7 +265,7 @@ class PinkyTracker:
                 color=color,
             )
 
-        up_patch = Patch(color="forestgreen", label=f"Size {size:.2f} $")
+        up_patch = Patch(color="forestgreen", label=f"Size {self.brick_size:.2f} $")
         window_patch = Patch(color="royalblue", label=f"Range {self.window}")
         ax.legend(handles=[up_patch, window_patch], loc="lower left")
 
@@ -351,9 +351,9 @@ def digest_sample(filename: str):
 
     tracer = PinkyTracker(symbol=data.meta.symbol, wix=5, maxlen=HALF_DAY_CYCLE)
     tracer.feed(points)
-    df = tracer.make_indicators()
+    df = tracer.analyze()
 
-    renko_df, size = tracer.compute_renko_bricks(df)
+    renko_df, size = tracer.compute_renko_data(df)
     events = tracer.run_mariashi_strategy(renko_df)
 
     charts_path = os.getenv("OUTPUTS_PATH", "charts")

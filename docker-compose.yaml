@@ -6,7 +6,7 @@ services:
             - ./src:/app/src
             - ./data:/app/data
             - ./out:/app/out
-        user: "1010"
+        user: "1051"
         environment:
             - CREDENTIALS_FILE=/app/credentials.ini
             - PRIVATE_CACHE=/app/data

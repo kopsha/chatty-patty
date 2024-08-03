@@ -1,6 +1,6 @@
 FROM python:3-slim
 
-RUN adduser --disabled-password --gecos "" --home=/app --uid=1010 patty
+RUN adduser --disabled-password --gecos "" --home=/app --uid=1051 patty
 
 RUN apt update && apt install --yes --no-install-recommends \
     entr \

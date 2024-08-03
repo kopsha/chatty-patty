@@ -4,11 +4,11 @@ from dataclasses import asdict, is_dataclass
 from datetime import datetime, timedelta, timezone
 from functools import cached_property
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
-from alpaca_client import AlpacaClient, Bar
-from thinker import FAST_CYCLE, FULL_CYCLE, PinkyTracker
+from alpaca_client import AlpacaClient
+from alpaca_trader import AlpacaTrader
+from thinker import FULL_CYCLE, PinkyTracker
 
 
 class DataclassEncoder(json.JSONEncoder):
@@ -77,6 +77,10 @@ class AlpacaScavenger:
             if is_new:
                 news.append((tracker.symbol, event, image))
 
+                trader = AlpacaTrader(self.client, position=pos)
+                if event == "confirmed bears":
+                    await trader.sell(pos.current_price)
+
         return news
 
     def make_tracker(self, symbol: str, cycle=FULL_CYCLE) -> PinkyTracker:
@@ -100,13 +104,13 @@ class AlpacaScavenger:
             tracker.write_to(self.CACHE)
 
     def strategic_run(self, tracker: PinkyTracker):
-        df = tracker.make_indicators()
-        renko_df, size = tracker.compute_renko_bricks(df)
+        df = tracker.analyze()
+        renko_df = tracker.compute_renko_data(df)
 
         events, is_new = tracker.run_mariashi_strategy(renko_df)
         if is_new:
             charts_path = os.getenv("OUTPUTS_PATH", "charts")
-            image = tracker.save_renko_chart(renko_df, events, size, path=charts_path)
+            image = tracker.save_renko_chart(renko_df, events, path=charts_path)
         else:
             image = None
 
