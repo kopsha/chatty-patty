@@ -135,12 +135,12 @@ class AlpacaClient:
         ]
         return quotes
 
-    async def fetch_bars(self, symbol: str, since: datetime, timeframe: str = "30T"):
+    async def fetch_bars(self, symbol: str, since: datetime, interval: str = "30T"):
         api_url = self.API_ROOT.format(group="data", method="v2/stocks/bars")
         query = dict(
             feed="iex",
             symbols=symbol,
-            timeframe=timeframe,
+            timeframe=interval,
             start=since.isoformat(),
         )
 

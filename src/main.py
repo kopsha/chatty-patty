@@ -3,15 +3,15 @@
 import asyncio
 import os
 import sys
+import traceback
 from configparser import ConfigParser
+from contextlib import asynccontextmanager
 from functools import wraps
 from signal import SIGINT, SIGTERM
-from contextlib import asynccontextmanager
 
 from alpaca import AlpacaScavenger
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from tellypatty import TellyPatty
-from yfapi_client import YahooFinanceClient
 
 CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", "credentials.ini")
 ERR_TOLERANCE = 3
@@ -29,6 +29,7 @@ def error_resilient(fn):
             self.err_count += 1
             print(flush=True)
             print("ERROR", self.err_count, "::", repr(err))
+            print(traceback.format_exc())
 
             if self.err_count >= ERR_TOLERANCE:
                 await self._stop_all_tasks()
@@ -54,7 +55,6 @@ class Seeker:
         self.scheduler = AsyncIOScheduler()
         self.tasks = list()
 
-        # self.yfapi = YahooFinanceClient(**credentials["yahoofinance"])
         self.alpaca = AlpacaScavenger(**credentials["alpaca"])
         self.patty = TellyPatty(
             **credentials["telegram"],
@@ -69,37 +69,30 @@ class Seeker:
 
     async def on_start(self):
         await self.patty.on_start()
-        # await self.yfapi.on_start()
         await self.alpaca.on_start()
 
         message = "\n".join(
             (
-                "Telepathy channel is up and running...",
-                self.alpaca.as_opening_str(),
+                "Telepathy channel is up.",
+                *self.alpaca.overview(),
             )
         )
         await self.patty.say(message)
 
-        # await self.alpaca.scan_most_active()
-
     async def on_stop(self):
         await self.alpaca.on_stop()
-        # await self.yfapi.on_stop()
-
-        await self.patty.say("Telepathy channel is closed.")
         await self.patty.on_stop()
 
     @error_resilient
     async def fast_task(self):
         print(":", end="", flush=True)
 
-        news = await self.alpaca.update_positions()
+        news = await self.alpaca.track_open_positions()
         print(".", end="")
 
         for symbol, event, image in news:
-            message = f"{symbol} > {event} <"
-            await self.patty.say(message)
-            await self.patty.selfie(image)
+            message = f"{symbol}: {event}"
+            await self.patty.selfie(image, caption=message)
 
     @error_resilient
     async def background_task(self):
@@ -124,7 +117,6 @@ class Seeker:
     @error_resilient
     async def hourly(self):
         await self.alpaca.client.fetch_market_clock()
-        await self.alpaca.client.fetch_most_active()
 
     async def _open_session(self):
         self.err_count = 0

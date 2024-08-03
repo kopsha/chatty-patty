@@ -24,17 +24,17 @@ class AlpacaScavenger:
     def __init__(self, api_key: str, secret):
         self.client = AlpacaClient(api_key, secret)
 
-        self.watchlist = SimpleNamespace(name="Hidden Multiplier", symbols=set())
         self.account = None
         self.market_clock = None
         self.trackers = dict()
+        self.positions = list()
 
     async def on_start(self):
         await self.client.on_start()
 
-        self.account = await self.client.fetch_account_info()
         await self.update_market_clock()
-        await self.pull_watchlist()
+        self.account = await self.client.fetch_account_info()
+        self.positions = await self.client.fetch_open_positions()
 
     async def on_stop(self):
         await self.client.on_stop()
@@ -42,37 +42,30 @@ class AlpacaScavenger:
     async def update_market_clock(self):
         self.market_clock = await self.client.fetch_market_clock()
 
-    def as_opening_str(self) -> str:
-        flat_watchlist = ",".join(self.watchlist.symbols) or "(empty)"
-        return "\n".join(
-            (
-                f"- market is open: {self.market_clock.is_open}",
-                f"- equity: {self.account.equity:.2f} $",
-                f"- portfolio: {self.account.portfolio_value:.2f} $",
-                f"- cash: {self.account.cash:.2f} $ / {self.account.buying_power:.2f} $",
-                f"- watchlist: {flat_watchlist}",
+    def overview(self) -> str:
+        lines = list()
+
+        market_status = "Open" if self.market_clock.is_open else "Closed"
+        lines.append(f"Market is {market_status}.")
+
+        lines.append(f"Cash: {self.account.cash:.2f}")
+        lines.append(f"Portfolio total: *{self.account.portfolio_value:.2f}* $")
+
+        for pos in self.positions:
+            lines.append(
+                f"*{pos.symbol}*: "
+                f"{pos.qty} x {pos.current_price:.2f} $ = {pos.market_value:.2f} $"
             )
-        )
+            lines.append(
+                f"return: {pos.unrealized_pl:.2f} $ ({pos.unrealized_plpc * 100:.2f} %)"
+            )
 
-    async def pull_watchlist(self):
-        found = await self.client.find_watchlist(named=self.watchlist.name)
-        if not found:
-            print("Remote watch list does not exist, creating one...")
-            await self.client.create_watchlist(named=self.watchlist.name)
+        return lines
 
-        watchlist = await self.client.fetch_watchlist(named=self.watchlist.name)
-        for ass in watchlist.assets:
-            self.watchlist.symbols.add(ass.symbol)
-
-    async def push_watchlist(self):
-        await self.client.update_watchlist(self.watchlist.name, self.watchlist.symbols)
-
-    async def update_positions(self):
-        positions = await self.client.fetch_open_positions()
-        print(".", end="")
-
+    async def track_open_positions(self):
+        self.positions = await self.client.fetch_open_positions()
         news = list()
-        for pos in positions:
+        for pos in self.positions:
             if pos.symbol not in self.trackers:
                 tracker = self.make_tracker(pos.symbol)
                 self.trackers[pos.symbol] = tracker
@@ -80,7 +73,6 @@ class AlpacaScavenger:
                 tracker = self.trackers[pos.symbol]
 
             await self.update_tracker(tracker)
-            print(".", end="")
             event, is_new, image = self.strategic_run(tracker)
             if is_new:
                 news.append((tracker.symbol, event, image))
@@ -88,7 +80,7 @@ class AlpacaScavenger:
         return news
 
     def make_tracker(self, symbol: str, cycle=FULL_CYCLE) -> PinkyTracker:
-        tracker = PinkyTracker(symbol=symbol, wix=5, maxlen=cycle)
+        tracker = PinkyTracker(symbol=symbol, wix=5, interval=30, maxlen=cycle)
         tracker.read_from(self.CACHE)
         return tracker
 
@@ -97,11 +89,13 @@ class AlpacaScavenger:
         a_month_ago = now - timedelta(days=90)
         since = max(tracker.last_timestamp, a_month_ago)
         delta = now - since
-
-        if (self.market_clock.is_open and (delta >= timedelta(minutes=30))) or (
+        interval = tracker.interval
+        if (self.market_clock.is_open and (delta >= timedelta(minutes=interval))) or (
             not self.market_clock.is_open and (delta >= timedelta(hours=16))
         ):
-            bars = await self.client.fetch_bars(tracker.symbol, since)
+            bars = await self.client.fetch_bars(
+                tracker.symbol, since, interval=f"{interval}Min"
+            )
             tracker.feed(map(asdict, bars))
             tracker.write_to(self.CACHE)
 
@@ -126,25 +120,6 @@ class AlpacaScavenger:
         for cmd, params in commands:
             func = getattr(self, "cmd_" + cmd)
             await func(params)
-
-    async def cmd_tail(self, params):
-        clean_params = set(map(str.upper, params))
-        self.watchlist.symbols.update(clean_params)
-        for symbol in clean_params:
-            self.quotes[symbol] = None
-        await self.push_watchlist()
-
-    async def cmd_drop(self, params):
-        clean_params = set(map(str.upper, params))
-        self.watchlist.symbols.difference_update(clean_params)
-
-        for symbol in clean_params:
-            self.quotes.pop(symbol, None)
-        await self.push_watchlist()
-
-    async def cmd_reload(self, params):
-        for sym in self.watchlist.symbols:
-            self.quotes[sym] = dict()
 
 
 if __name__ == "__main__":

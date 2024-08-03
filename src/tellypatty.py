@@ -26,6 +26,7 @@ class TellyPatty:
         self._load_internals()
 
     async def on_stop(self):
+        await self.say("Telepathy channel is closed.")
         self._save_internals()
         await self.client.session.close()
         self.client = None
@@ -94,11 +95,12 @@ class TellyPatty:
 
         return response
 
-    async def selfie(self, picture: Path):
+    async def selfie(self, picture: Path, caption: str):
         api_url = self.API_ROOT.format(token=self.token, method="sendPhoto")
         with open(picture, "rb") as image_file:
             form = FormData()
             form.add_field("chat_id", str(self.chat_id))
             form.add_field("photo", image_file)
+            form.add_field("caption", caption)
             response = await self.client.post(api_url, form_data=form)
         return response

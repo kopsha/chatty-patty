@@ -24,7 +24,9 @@ RenkoBrick = namedtuple("RenkoBrick", ["timestamp", "open", "close", "kind"])
 class PinkyTracker:
     """Keeps track of a single symbol"""
 
-    def __init__(self, symbol: str, wix: int = 6, maxlen: int = FULL_CYCLE):
+    def __init__(
+        self, symbol: str, wix: int = 6, interval: int = 30, maxlen: int = FULL_CYCLE
+    ):
         self.symbol = symbol
         self.wix = wix  # WindowIndex
         self.maxlen = maxlen
@@ -33,6 +35,7 @@ class PinkyTracker:
         self.pre_signal = None
         self.last_timestamp = datetime.now(timezone.utc) - timedelta(days=100)
         self.last_event = None
+        self.interval = interval
 
     def feed(self, data_points: list[dict]):
         self.data.extend(CandleStick(**x) for x in data_points)
@@ -42,8 +45,12 @@ class PinkyTracker:
         ts = datetime.utcfromtimestamp(self.data[-1].timestamp)
         self.last_timestamp = pytz.utc.localize(ts)
 
+    @cached_property
+    def data_filename(self) -> str:
+        return f"{self.symbol}-{self.interval}m-{self.maxlen}p.json"
+
     def read_from(self, cache: Path):
-        filepath = cache / f"{self.symbol}-{self.maxlen}p.json"
+        filepath = cache / self.data_filename
         if not filepath.exists():
             print(f"Symbol {self.symbol} has no cached data")
             return
@@ -58,7 +65,7 @@ class PinkyTracker:
             print("Nothing to write")
             return
 
-        filepath = cache / f"{self.symbol}-{self.maxlen}p.json"
+        filepath = cache / self.data_filename
         with open(filepath, "wt") as datafile:
             data = list(self.data)
             datafile.write(json.dumps(data, indent=4, cls=DataclassEncoder))
@@ -227,7 +234,7 @@ class PinkyTracker:
         major_ticks = list()
         major_labels = list()
         minor_ticks = list()
-        divider = len(timestamps) // 10
+        divider = (len(timestamps) // 10) or 1
         for i, ts in enumerate(timestamps):
             if i % divider == 0:
                 major_ticks.append(i)
@@ -262,7 +269,7 @@ class PinkyTracker:
         window_patch = Patch(color="royalblue", label=f"Range {self.window}")
         ax.legend(handles=[up_patch, window_patch], loc="lower left")
 
-        filename = f"{self.symbol}-renko-{self.maxlen}p.png"
+        filename = f"{self.symbol}-{self.interval}m-{self.maxlen}p-renko.png"
         filepath = os.path.join(path, filename)
         plt.savefig(filepath, bbox_inches="tight", dpi=300)
         plt.close()
