@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from alpaca_client import AlpacaClient
-from thinker import FAST_CYCLE, FULL_CYCLE, PinkyTracker
+from thinker import FULL_CYCLE, PinkyTracker
 
 CREDENTIALS_FILE = os.getenv("CREDENTIALS_FILE", "credentials.ini")
 CACHE = Path(os.getenv("PRIVATE_CACHE", "."))
@@ -62,8 +62,8 @@ async def analyze(symbol, client: AlpacaClient, market_clock, cycle=FULL_CYCLE):
 
     tracer.write_to(CACHE)
 
-    df = tracer.make_indicators()
-    renko_df, size = tracer.compute_renko_bricks(df)
+    df = tracer.analyze()
+    renko_df, size = tracer.compute_renko_data(df)
     print(symbol, "brick size", size)
     events = tracer.run_mariashi_strategy(renko_df)
 

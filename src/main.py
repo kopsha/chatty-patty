@@ -86,19 +86,18 @@ class Seeker:
     @error_resilient
     async def fast_task(self):
         print(":", end="", flush=True)
-
-        news = await self.alpaca.track_open_positions()
-        print(".", end="")
-
-        for symbol, event, image in news:
-            message = f"{symbol}: {event}"
-            await self.patty.selfie(image, caption=message)
+        # news = await self.alpaca.track_open_positions()
+        # print(".", end="")
+        #
+        # for symbol, event, image in news:
+        #     message = f"{symbol}: {event}"
+        #     await self.patty.selfie(image, caption=message)
 
     @error_resilient
     async def background_task(self):
         print(".", end="", flush=True)
 
-        data = await self.patty.get_updates(timeout=13)
+        data = await self.patty.get_updates(timeout=2)
         commands, system_commands, errors = self.patty.digest_updates(data)
 
         if errors:
@@ -124,8 +123,8 @@ class Seeker:
             await self.on_start()
             self.keep_running = True
         except Exception as err:
-            print(err.__class__.__name__, "happened during start-up.")
-            print(err)
+            print(flush=True)
+            print(traceback.format_exc())
 
     async def _close_session(self):
         self.keep_running = False
@@ -134,7 +133,7 @@ class Seeker:
     async def _loop(self):
         while self.keep_running:
             await self.background_task()
-            await asyncio.sleep(0.21)
+            await asyncio.sleep(0.55)
 
     async def _stop_all_tasks(self):
         self.keep_running = False

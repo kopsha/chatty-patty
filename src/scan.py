@@ -19,9 +19,9 @@ def digest_sample(filepath: Path):
     bars = [Bar.from_json(data) for data in raw_data]
 
     tracer.feed(map(asdict, bars))
-    df = tracer.make_indicators()
+    df = tracer.analyze()
 
-    renko_df, size = tracer.compute_renko_bricks(df)
+    renko_df, size = tracer.compute_renko_data(df)
     events = tracer.run_mariashi_strategy(renko_df)
 
     charts_path = os.getenv("OUTPUTS_PATH", "charts")

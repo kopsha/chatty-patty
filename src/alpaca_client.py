@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum, auto
 from types import SimpleNamespace
-from typing import Optional, Self, Union
+from typing import Optional, Self
 from uuid import UUID
 
 from hasty import HastyClient
@@ -111,23 +111,28 @@ class Order:
     updated_at: datetime
     submitted_at: datetime
     symbol: str
-    order_class: OrderClass
     type: OrderType
     side: OrderSide
     status: OrderStatus
-
-    notional: Optional[Union[Decimal, str]] = None
-    qty: Optional[int] = None
-    filled_qty: Union[int] = 0
-    filled_avg_price: Optional[Decimal] = None
-    limit_price: Optional[Decimal] = None
-    stop_price: Optional[Decimal] = None
-    extended_hours: bool = False
+    qty: int = 0
+    filled_qty: int = 0
+    filled_avg_price: Decimal = Decimal()
+    limit_price: Decimal = Decimal()
+    stop_price: Decimal = Decimal()
+    order_class: OrderClass = OrderClass.SIMPLE
 
     @classmethod
     def from_alpaca(cls: Self, data: SimpleNamespace):
-        valid_fields = {f.name for f in fields(cls)}
-        valid_data = {k: v for k, v in vars(data).items() if k in valid_fields}
+        valid_fields = {f.name: f.type for f in fields(cls)}
+        valid_data = dict()
+        for k, v in vars(data).items():
+            if v and k in valid_fields:
+                typed = valid_fields[k]
+                if k.endswith("_at"):
+                    typed_value = datetime.fromisoformat(v)
+                else:
+                    typed_value = typed(v)
+                valid_data[k] = typed_value
         return cls(**valid_data)
 
 

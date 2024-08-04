@@ -1,7 +1,7 @@
 import json
 import math
 import os
-from collections import deque, namedtuple
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from functools import cached_property
@@ -16,16 +16,15 @@ from matplotlib.patches import Patch, Rectangle
 from ta.volatility import average_true_range
 from ta.volume import on_balance_volume
 
-from .metaflip import FIBONACCI, FULL_CYCLE, CandleStick, DataclassEncoder
+from .metaflip import FIBONACCI, QUARTER_RANGE, CandleStick, DataclassEncoder, RenkoBrick
 
-RenkoBrick = namedtuple("RenkoBrick", ["timestamp", "open", "close", "kind"])
 
 
 class PinkyTracker:
     """Keeps track of a single symbol"""
 
     def __init__(
-        self, symbol: str, wix: int = 6, interval: int = 30, maxlen: int = FULL_CYCLE
+        self, symbol: str, wix: int = 6, interval: int = 30, maxlen: int = QUARTER_RANGE
     ):
         self.symbol = symbol
         self.wix = wix  # WindowIndex
@@ -125,7 +124,7 @@ class PinkyTracker:
             if row.close >= renko_high + size:
                 while row.close >= renko_high + size:
                     new_brick = RenkoBrick(
-                        row.Index, renko_high, renko_high + size, "bulls"
+                        row.Index, renko_high, renko_high + size, "up"
                     )
                     renko_low = renko_high
                     renko_high += size
@@ -133,7 +132,7 @@ class PinkyTracker:
             elif row.close <= renko_low - size:
                 while row.close <= renko_low - size:
                     new_brick = RenkoBrick(
-                        row.Index, renko_low, renko_low - size, "bears"
+                        row.Index, renko_low, renko_low - size, "down"
                     )
                     renko_high = renko_low
                     renko_low -= size
@@ -201,7 +200,7 @@ class PinkyTracker:
 
         timestamps = list()
         for i, brick in enumerate(renko_df.itertuples()):
-            if brick.open < brick.close:
+            if brick.direction == "up":
                 rect = Rectangle(
                     (i + 1, brick.open),
                     1,
