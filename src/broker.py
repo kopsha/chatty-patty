@@ -1,7 +1,6 @@
 import json
 import os
 from collections import deque
-from dataclasses import asdict, dataclass
 from datetime import datetime
 from decimal import Decimal
 from functools import cached_property
@@ -12,16 +11,7 @@ import pytz
 from alpaca_client import AlpacaClient, Order, OrderSide
 from matplotlib import pyplot as plt
 from matplotlib.patches import Patch, Rectangle
-from thinker import CandleStick, ThinkEncoder, RenkoBrick
-
-
-@dataclass
-class RenkoState:
-    high: Decimal
-    low: Decimal
-    abs_high: Decimal
-    abs_low: Decimal
-    last_index: datetime
+from thinker import CandleStick, ThinkEncoder, RenkoBrick, RenkoState
 
 
 class RenkoTracker:
@@ -64,9 +54,7 @@ class RenkoTracker:
             data = json.loads(datafile.read(), object_hook=ThinkEncoder.object_hook)
             for key, value in data.items():
                 if key == "data":
-                    self.data = deque(CandleStick(**x) for x in value)
-                elif key == "bricks":
-                    self.bricks = list(RenkoBrick(**x) for x in value)
+                    self.data = deque(value)
                 else:
                     setattr(self, key, value)
 
@@ -80,7 +68,7 @@ class RenkoTracker:
             data = dict()
             for k, v in vars(self).items():
                 if isinstance(v, deque):
-                    data[k] = list(v)
+                    data[k] = [*v]
                 else:
                     data[k] = v
             datafile.write(json.dumps(data, indent=4, cls=ThinkEncoder))
@@ -88,9 +76,7 @@ class RenkoTracker:
     def feed(self, data_points: list[dict]):
         last_ts = int(self.current_time.timestamp())
         new_data = list(
-            CandleStick(**x)
-            for x in data_points
-            if x["timestamp"] > last_ts
+            CandleStick(**x) for x in data_points if x["timestamp"] > last_ts
         )
 
         if not new_data:

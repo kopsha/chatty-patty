@@ -23,7 +23,7 @@ def error_resilient(fn):
     async def wrapper(self, *args, **kwargs):
         try:
             return await fn(self, *args, **kwargs)
-        except asyncio.CancelledError as err:
+        except asyncio.CancelledError:
             await self._stop_all_tasks()
         except Exception as err:
             self.err_count += 1
@@ -122,7 +122,7 @@ class Seeker:
         try:
             await self.on_start()
             self.keep_running = True
-        except Exception as err:
+        except Exception:
             print(flush=True)
             print(traceback.format_exc())
 

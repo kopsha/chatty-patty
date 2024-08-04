@@ -16,8 +16,14 @@ from matplotlib.patches import Patch, Rectangle
 from ta.volatility import average_true_range
 from ta.volume import on_balance_volume
 
-from .metaflip import FIBONACCI, QUARTER_RANGE, CandleStick, ThinkEncoder, RenkoBrick
-
+from .metaflip import (
+    FIBONACCI,
+    QUARTER_RANGE,
+    CandleStick,
+    ThinkEncoder,
+    RenkoBrick,
+    DAY_RANGE,
+)
 
 
 class PinkyTracker:
@@ -325,12 +331,12 @@ def from_yfapi(data):
     volumes = data.indicators.quote[0].volume
 
     points = list()
-    for ts, o, h, l, c, v in zip(timestamps, opens, highs, lows, closes, volumes):
+    for ts, o, h, lo, c, v in zip(timestamps, opens, highs, lows, closes, volumes):
         point = dict(
             timestamp=datetime.fromtimestamp(ts),
             open=o,
             high=h,
-            low=l,
+            low=lo,
             close=c,
             volume=v,
         )
@@ -348,7 +354,7 @@ def digest_sample(filename: str):
     data = to_namespace(raw_data["chart"]["result"][0])
     points = from_yfapi(data)
 
-    tracer = PinkyTracker(symbol=data.meta.symbol, wix=5, maxlen=HALF_DAY_CYCLE)
+    tracer = PinkyTracker(symbol=data.meta.symbol, wix=5, maxlen=DAY_RANGE)
     tracer.feed(points)
     df = tracer.analyze()
 

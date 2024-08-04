@@ -1,11 +1,9 @@
-import json
 import os
 from copy import deepcopy
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict
 from decimal import Decimal
 from functools import cached_property
 from pathlib import Path
-from typing import Any
 
 from alpaca_client import AlpacaClient, OrderStatus
 from broker import PositionBroker
@@ -59,7 +57,7 @@ class AlpacaScavenger:
                 entry_orders.append(order)
                 qty -= order.qty
 
-        bs = dict(NCNC=Decimal('0.015'), SERV=Decimal('0.859'))
+        bs = dict(NCNC=Decimal("0.015"), SERV=Decimal("0.859"))
         brokers = [
             PositionBroker(self.client, order=o, brick_size=bs[o.symbol])
             for o in entry_orders
@@ -67,7 +65,9 @@ class AlpacaScavenger:
         return brokers
 
     async def replay_broker(self, broker: PositionBroker):
-        bars = await self.client.fetch_bars(broker.symbol, broker.entry_time, interval="1T")
+        bars = await self.client.fetch_bars(
+            broker.symbol, broker.entry_time, interval="1T"
+        )
 
         for bar in bars:
             # print("feeding")

@@ -1,6 +1,6 @@
 import pytest
 import pytest_asyncio
-from unittest.mock import patch, MagicMock, AsyncMock, ANY
+from unittest.mock import patch, MagicMock, AsyncMock
 from types import SimpleNamespace
 
 from aiohttp import ClientSession, ClientResponse

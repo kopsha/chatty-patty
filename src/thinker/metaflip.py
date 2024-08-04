@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import json
-from collections import namedtuple
+import sys
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime
 from decimal import Decimal
@@ -15,13 +15,12 @@ MONTH_RANGE = 4 * WEEK_RANGE
 QUARTER_RANGE = 3 * MONTH_RANGE
 
 
-RenkoBrick = namedtuple("RenkoBrick", ["timestamp", "open", "close", "direction"])
-
-
 class ThinkEncoder(json.JSONEncoder):
     def default(self, o: Any) -> Any:
         if is_dataclass(o):
-            return asdict(o)
+            data_obj = asdict(o)
+            data_obj["_cls_name"] = type(o).__name__
+            return data_obj
         elif isinstance(o, Decimal):
             return float(o)
         elif isinstance(o, datetime):
@@ -32,7 +31,27 @@ class ThinkEncoder(json.JSONEncoder):
     def object_hook(obj):
         if iso_tm := obj.get("iso_datetime"):
             return datetime.fromisoformat(iso_tm)
+        elif classname := obj.pop("_cls_name", None):
+            cls = getattr(sys.modules[__name__], classname)
+            return cls(**obj)
         return obj
+
+
+@dataclass
+class RenkoState:
+    high: Decimal
+    low: Decimal
+    abs_high: Decimal
+    abs_low: Decimal
+    last_index: datetime
+
+
+@dataclass
+class RenkoBrick:
+    timestamp: int
+    open: Decimal
+    close: Decimal
+    direction: str
 
 
 @dataclass

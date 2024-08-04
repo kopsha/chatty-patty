@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum, auto
 from types import SimpleNamespace
-from typing import Optional, Self
+from typing import Self
 from uuid import UUID
 
 from hasty import HastyClient
