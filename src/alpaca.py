@@ -81,11 +81,6 @@ class AlpacaScavenger:
         for bar in bars:
             broker.feed([asdict(bar)])
 
-        df = broker.trac.analyze()
-        bricks_df = broker.trac.compute_bricks(df)
-        if len(bricks_df.index):
-            broker.trac.draw_chart(bricks_df, broker.CHARTS_PATH)
-
     def overview(self) -> str:
         lines = list()
 

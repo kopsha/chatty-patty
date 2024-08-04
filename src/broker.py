@@ -1,7 +1,8 @@
 import json
 import os
 from collections import deque
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 from functools import cached_property
 from pathlib import Path
@@ -11,11 +12,20 @@ import pytz
 from alpaca_client import AlpacaClient, Order, OrderSide
 from matplotlib import pyplot as plt
 from matplotlib.patches import Patch, Rectangle
-from thinker import FIBONACCI, CandleStick, DataclassEncoder, RenkoBrick
+from thinker import CandleStick, DataclassEncoder, RenkoBrick
+
+
+@dataclass
+class RenkoState:
+    high: Decimal
+    low: Decimal
+    abs_high: Decimal
+    abs_low: Decimal
+    last_index: datetime
 
 
 class RenkoTracker:
-    MAXLEN = 15 * 30  # Minutes of typical market hours
+    MAXLEN = 15 * 30  # Minutes of typical market day
     PRECISION = 3
 
     def __init__(
@@ -24,109 +34,123 @@ class RenkoTracker:
         entry_price: Decimal,
         entry_time: datetime,
         brick_size: Decimal,
-        wix: int = 6,
     ):
         self.symbol = symbol
         self.entry_price = entry_price
-        self.wix = wix  # WindowIndex
+        self.current_price = entry_price
         self.data: deque[CandleStick] = deque(maxlen=self.MAXLEN)
-        self.current_price = Decimal()
         self.current_time = entry_time
         self.brick_size = brick_size
 
-    def feed(self, data_points: list[dict]):
-        """Trust incoming data"""
-        self.data.extend(CandleStick(**x) for x in data_points)
-        if self.data:
-            self.current_price = self.data[-1].close
-            ts = datetime.fromtimestamp(self.data[-1].timestamp)
-            self.current_time = pytz.utc.localize(ts)
+        self.renko_state = RenkoState(
+            high=entry_price,
+            abs_high=entry_price,
+            low=entry_price,
+            abs_low=entry_price,
+            last_index=entry_time,
+        )
+        self.bricks = list()
 
     @cached_property
-    def data_filename(self) -> str:
-        return f"{self.symbol}-1m-{self.MAXLEN}p.json"
-
-    @cached_property
-    def chart_filename(self) -> str:
-        return f"{self.symbol}-1m-{self.MAXLEN}p-renko.png"
+    def filename(self) -> str:
+        print(self, id(self), id(self) % 64)
+        return f"{self.symbol}-1m-{self.MAXLEN}p-{id(self) % 64}"
 
     def read_from(self, cache: Path):
-        filepath = cache / self.data_filename
+        filepath = cache / (self.filename + ".json")
         if not filepath.exists():
             print(f"Symbol {self.symbol} has no cached data")
             return
 
         with open(filepath, "rt") as datafile:
             data_points = json.loads(datafile.read())
-
-        self.feed(data_points)
+            self.feed(data_points)
 
     def write_to(self, cache: Path):
         if not self.data:
             print("Nothing to write")
             return
 
-        filepath = cache / self.data_filename
+        filepath = cache / (self.filename + ".json")
         with open(filepath, "wt") as datafile:
             data = list(self.data)
             datafile.write(json.dumps(data, indent=4, cls=DataclassEncoder))
 
-    @cached_property
-    def window(self):
-        return FIBONACCI[self.wix]
+    def feed(self, data_points: list[dict]):
+        new_data = list(CandleStick(**x) for x in data_points)
 
-    def analyze(self) -> pd.DataFrame:
-        if not self.data:
-            print("Cannot analyze anything, data feed is empty.")
-            return pd.DataFrame()
+        if not new_data:
+            print("Got an empty feed")
+            return
 
-        df = pd.DataFrame(self.data).astype(CandleStick.AS_DTYPE)
+        self.data.extend(new_data)
+        self.current_price = new_data[-1].close
+        ts = datetime.fromtimestamp(new_data[-1].timestamp)
+        self.current_time = pytz.utc.localize(ts)
+
+        # prepare data frame for bricks computation
+        df = pd.DataFrame(new_data).astype(CandleStick.AS_DTYPE)
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
         df.set_index("timestamp", inplace=True)
 
-        df["mavg"] = df["close"].rolling(self.window).mean()
-        df["stdev"] = df["close"].rolling(self.window).std()
-        df["avg_price"] = df[["open", "close", "low", "high"]].mean(axis=1)
-        df["absolute_range"] = df["high"] - df["low"]
-        df["avg_absolute_range"] = df["absolute_range"].rolling(self.window).mean()
-
-        return df
-
-    def compute_bricks(self, df: pd.DataFrame):
-        size = self.brick_size
-        renko_high = self.entry_price
-        renko_low = self.entry_price - size
-
+        # compute bricks from new data
         bricks = list()
-        last_index = df.index[0]
         for row in df.itertuples():
-            if row.close >= renko_high + size:
-                while row.close >= renko_high + size:
-                    new_brick = RenkoBrick(
-                        last_index, renko_high, renko_high + size, "up"
+            new_bricks = self.digest_row(row)
+            bricks.extend(new_bricks)
+
+        self.bricks.extend(bricks)
+        return bricks
+
+    def digest_row(self, row):
+        new_bricks = list()
+
+        if row.close >= self.renko_state.high + self.brick_size:
+            # build bullish bricks
+            while row.close >= self.renko_state.high + self.brick_size:
+                new_bricks.append(
+                    RenkoBrick(
+                        self.renko_state.last_index,
+                        self.renko_state.high,
+                        self.renko_state.high + self.brick_size,
+                        "up",
                     )
-                    bricks.append(new_brick)
-                    last_index = row.Index
-                    renko_low = renko_high
-                    renko_high += size
+                )
+                self.renko_state.last_index = row.Index
+                self.renko_state.low = self.renko_state.high
+                self.renko_state.high += self.brick_size
+                self.renko_state.abs_high = max(
+                    self.renko_state.high, self.renko_state.abs_high
+                )
 
-            elif row.close <= renko_low - size:
-                while row.close <= renko_low - size:
-                    new_brick = RenkoBrick(
-                        last_index, renko_low, renko_low - size, "down"
+        elif row.close <= self.renko_state.low - self.brick_size:
+            # build bearish bricks
+            while row.close <= self.renko_state.low - self.brick_size:
+                new_bricks.append(
+                    RenkoBrick(
+                        self.renko_state.last_index,
+                        self.renko_state.low,
+                        self.renko_state.low - self.brick_size,
+                        "down",
                     )
-                    bricks.append(new_brick)
-                    last_index = row.Index
-                    renko_high = renko_low
-                    renko_low -= size
+                )
+                self.renko_state.last_index = row.Index
+                self.renko_state.high = self.renko_state.low
+                self.renko_state.low -= self.brick_size
+                self.renko_state.abs_low = min(
+                    self.renko_state.low, self.renko_state.abs_low
+                )
 
-        return pd.DataFrame(bricks)
+        return new_bricks
 
-    def draw_chart(self, renko_df: pd.DataFrame, to_folder: Path):
+    def draw_chart(self, to_folder: Path):
+        if not self.data:
+            print("No data to chart")
+            return None
+
         fig, ax = plt.subplots(figsize=(21, 13))
-
         timestamps = list()
-        for i, brick in enumerate(renko_df.itertuples()):
+        for i, brick in enumerate(self.bricks):
             if brick.direction == "up":
                 rect = Rectangle(
                     (i, brick.open),
@@ -150,13 +174,6 @@ class RenkoTracker:
         timestamps.append(datetime.fromtimestamp(self.data[-1].timestamp))
 
         # humanize the axes
-        ax.set_ylim(
-            [
-                min(min(renko_df["open"]), min(renko_df["close"])) - self.brick_size / 3,
-                max(max(renko_df["open"]), max(renko_df["close"])) + self.brick_size / 3,
-            ]
-        )
-
         major_ticks = list()
         major_labels = list()
         minor_ticks = list()
@@ -167,18 +184,22 @@ class RenkoTracker:
                 major_labels.append(ts.strftime("%b %d, %H:%M"))
             else:
                 minor_ticks.append(i)
-
         ax.set_xticks(major_ticks)
         ax.set_xticklabels(major_labels)
         ax.set_xticks(minor_ticks, minor=True)
-        ax.grid()
+        ax.set_ylim(
+            [
+                self.renko_state.abs_low - self.brick_size / 3,
+                self.renko_state.abs_high + self.brick_size / 3,
+            ]
+        )
 
         up_patch = Patch(color="forestgreen", label=f"Size {self.brick_size:.2f} $")
         down_patch = Patch(color="tomato", label=f"Size {self.brick_size:.2f} $")
-        window_patch = Patch(color="royalblue", label=f"Range {self.window}")
-        ax.legend(handles=[up_patch, down_patch, window_patch], loc="lower left")
+        ax.legend(handles=[up_patch, down_patch], loc="lower left")
+        ax.grid()
 
-        filepath = to_folder / self.chart_filename
+        filepath = to_folder / (self.filename + "-renko.png")
         plt.savefig(filepath, bbox_inches="tight", dpi=300)
         plt.close()
 
@@ -228,15 +249,10 @@ class PositionBroker:
         return self.qty * self.entry_price
 
     def feed(self, data_points: list[dict]):
-        self.trac.feed(data_points)
-        df = self.trac.analyze()
-        bricks_df = self.trac.compute_bricks(df)
-        if bricks_df.size:
-            # self.trac.draw_chart(bricks_df, self.CHARTS_PATH)
-            print(len(self.trac.data), "points, and", len(bricks_df.index), "bricks.")
-        else:
-            print(len(self.trac.data), "points, but no bricks.")
-
+        new_bricks = self.trac.feed(data_points)
+        if new_bricks:
+            self.trac.draw_chart(self.CHARTS_PATH)
+            print("Added", len(new_bricks), "bricks.")
 
     async def buy(self, qty: int, price: Decimal):
         if self.order:
