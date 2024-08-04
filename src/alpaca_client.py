@@ -35,26 +35,15 @@ class Account:
 
 @dataclass
 class Quote:
-    symbol: str
     bid_price: Decimal
     bid_size: int
     ask_price: Decimal
     ask_size: int
     ts: str
 
-    def __str__(self) -> str:
-        return "\n".join(
-            (
-                f"_{self.symbol}_",
-                f"bid: {self.bid_price:7.2f} $ (x {self.bid_size})",
-                f"ask: {self.ask_price:7.2f} $ (x {self.ask_size})",
-            )
-        )
-
     @staticmethod
-    def from_alpaca(symbol: str, data: SimpleNamespace):
+    def from_alpaca(data: SimpleNamespace):
         return Quote(
-            symbol=symbol,
             ts=data.t,
             ask_price=data.ap,
             ask_size=getattr(data, "as"),
@@ -295,15 +284,40 @@ class AlpacaClient:
         symbols = [data.symbol for data in response.most_actives]
         return symbols
 
-    async def fetch_quotes(self, symbols: list[str]):
-        api_url = self.API_ROOT.format(group="data", method="v2/stocks/quotes/latest")
-        query = dict(feed="iex", symbols=",".join(symbols))
-        response = await self.client.get(api_url, params=query)
+    async def fetch_quotes(self, symbol: str, since: datetime):
+        api_url = self.API_ROOT.format(group="data", method="v2/stocks/quotes")
+        query = dict(
+            feed="iex",
+            symbols=symbol,
+            start=since.isoformat(),
+        )
+        quotes = list()
+        next_token = True
+        count = 0
+        while next_token:
+            response = await self.client.get(api_url, params=query)
+            next_token = response.next_page_token
+            query["page_token"] = next_token
 
-        quotes = [
-            Quote.from_alpaca(data=data, symbol=symbol)
-            for symbol, data in response.quotes.__dict__.items()
-        ]
+            if vars(response.quotes):
+                quotes_data = getattr(response.quotes, symbol)
+                quotes.extend(Quote.from_alpaca(data) for data in quotes_data)
+            count += 1
+
+        return quotes
+
+    async def fetch_latest_quote(self, symbol: str):
+        api_url = self.API_ROOT.format(group="data", method="v2/stocks/quotes/latest")
+        query = dict(
+            feed="iex",
+            symbols=symbol,
+        )
+        response = await self.client.get(api_url, params=query)
+        quotes = list()
+        if vars(response.quotes):
+            data = getattr(response.quotes, symbol)
+            quotes.append(Quote.from_alpaca(data))
+
         return quotes
 
     async def fetch_bars(self, symbol: str, since: datetime, interval: str = "30T"):
@@ -329,6 +343,15 @@ class AlpacaClient:
             count += 1
 
         return bars
+
+    async def fetch_snapshot(self, symbol: str):
+        api_url = self.API_ROOT.format(group="data", method=f"v2/stocks/snapshots")
+        query = dict(
+            feed="iex",
+            symbols=symbol,
+        )
+        response = await self.client.get(api_url, params=query)
+        return response
 
 
 if __name__ == "__main__":

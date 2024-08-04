@@ -29,7 +29,14 @@ class AlpacaScavenger:
         self.brokers = await self.make_brokers_for_open_positions()
 
         for one in self.brokers:
-            await self.replay_broker(one)
+            # await self.replay_broker(one)
+            print()
+            print(f"------------ {one.symbol} ---- {one.trac.current_time} ------------------")
+            quotes = await self.client.fetch_quotes(one.symbol, one.trac.current_time)
+            for i, q in enumerate(quotes[:100]):
+                print(i, q)
+            print("full length is", len(quotes))
+            
 
     async def on_stop(self):
         await self.client.on_stop()
