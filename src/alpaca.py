@@ -11,13 +11,6 @@ from alpaca_client import AlpacaClient, OrderStatus
 from broker import PositionBroker
 
 
-class DataclassEncoder(json.JSONEncoder):
-    def default(self, o: Any) -> Any:
-        if is_dataclass(o):
-            return asdict(o)
-        return super().default(o)
-
-
 class AlpacaScavenger:
     CACHE = Path(os.getenv("PRIVATE_CACHE", "."))
 
@@ -66,7 +59,7 @@ class AlpacaScavenger:
                 entry_orders.append(order)
                 qty -= order.qty
 
-        bs = dict(NCNC=Decimal(0.015), SERV=Decimal(0.859))
+        bs = dict(NCNC=Decimal('0.015'), SERV=Decimal('0.859'))
         brokers = [
             PositionBroker(self.client, order=o, brick_size=bs[o.symbol])
             for o in entry_orders
@@ -74,11 +67,11 @@ class AlpacaScavenger:
         return brokers
 
     async def replay_broker(self, broker: PositionBroker):
-        print("---\n", broker.entry_time)
         bars = await self.client.fetch_bars(broker.symbol, broker.entry_time, interval="1T")
 
-        print("got", len(bars), "points")
         for bar in bars:
+            # print("feeding")
+            # print(bar)
             broker.feed([asdict(bar)])
 
     def overview(self) -> str:

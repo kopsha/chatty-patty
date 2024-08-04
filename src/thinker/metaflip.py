@@ -2,6 +2,7 @@
 import json
 from collections import namedtuple
 from dataclasses import asdict, dataclass, is_dataclass
+from datetime import datetime
 from decimal import Decimal
 from enum import IntEnum
 from typing import Any, ClassVar
@@ -17,11 +18,21 @@ QUARTER_RANGE = 3 * MONTH_RANGE
 RenkoBrick = namedtuple("RenkoBrick", ["timestamp", "open", "close", "direction"])
 
 
-class DataclassEncoder(json.JSONEncoder):
+class ThinkEncoder(json.JSONEncoder):
     def default(self, o: Any) -> Any:
         if is_dataclass(o):
             return asdict(o)
+        elif isinstance(o, Decimal):
+            return float(o)
+        elif isinstance(o, datetime):
+            return dict(iso_datetime=o.isoformat())
         return super().default(o)
+
+    @staticmethod
+    def object_hook(obj):
+        if iso_tm := obj.get("iso_datetime"):
+            return datetime.fromisoformat(iso_tm)
+        return obj
 
 
 @dataclass

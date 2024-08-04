@@ -1,7 +1,7 @@
 import json
 import os
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from decimal import Decimal
 from functools import cached_property
@@ -12,7 +12,7 @@ import pytz
 from alpaca_client import AlpacaClient, Order, OrderSide
 from matplotlib import pyplot as plt
 from matplotlib.patches import Patch, Rectangle
-from thinker import CandleStick, DataclassEncoder, RenkoBrick
+from thinker import CandleStick, ThinkEncoder, RenkoBrick
 
 
 @dataclass
@@ -41,7 +41,6 @@ class RenkoTracker:
         self.data: deque[CandleStick] = deque(maxlen=self.MAXLEN)
         self.current_time = entry_time
         self.brick_size = brick_size
-
         self.renko_state = RenkoState(
             high=entry_price,
             abs_high=entry_price,
@@ -53,8 +52,7 @@ class RenkoTracker:
 
     @cached_property
     def filename(self) -> str:
-        print(self, id(self), id(self) % 64)
-        return f"{self.symbol}-1m-{self.MAXLEN}p-{id(self) % 64}"
+        return f"{self.symbol}-1m-{self.MAXLEN}p"
 
     def read_from(self, cache: Path):
         filepath = cache / (self.filename + ".json")
@@ -63,8 +61,14 @@ class RenkoTracker:
             return
 
         with open(filepath, "rt") as datafile:
-            data_points = json.loads(datafile.read())
-            self.feed(data_points)
+            data = json.loads(datafile.read(), object_hook=ThinkEncoder.object_hook)
+            for key, value in data.items():
+                if key == "data":
+                    self.data = deque(CandleStick(**x) for x in value)
+                elif key == "bricks":
+                    self.bricks = list(RenkoBrick(**x) for x in value)
+                else:
+                    setattr(self, key, value)
 
     def write_to(self, cache: Path):
         if not self.data:
@@ -73,11 +77,21 @@ class RenkoTracker:
 
         filepath = cache / (self.filename + ".json")
         with open(filepath, "wt") as datafile:
-            data = list(self.data)
-            datafile.write(json.dumps(data, indent=4, cls=DataclassEncoder))
+            data = dict()
+            for k, v in vars(self).items():
+                if isinstance(v, deque):
+                    data[k] = list(v)
+                else:
+                    data[k] = v
+            datafile.write(json.dumps(data, indent=4, cls=ThinkEncoder))
 
     def feed(self, data_points: list[dict]):
-        new_data = list(CandleStick(**x) for x in data_points)
+        last_ts = int(self.current_time.timestamp())
+        new_data = list(
+            CandleStick(**x)
+            for x in data_points
+            if x["timestamp"] > last_ts
+        )
 
         if not new_data:
             print("Got an empty feed")
@@ -238,6 +252,7 @@ class PositionBroker:
             self.trac = RenkoTracker(
                 self.symbol, self.entry_price, self.entry_time, brick_size=brick_size
             )
+            self.trac.read_from(self.CACHE)
         else:
             self.symbol = symbol
 
@@ -253,6 +268,7 @@ class PositionBroker:
         if new_bricks:
             self.trac.draw_chart(self.CHARTS_PATH)
             print("Added", len(new_bricks), "bricks.")
+            self.trac.write_to(self.CACHE)
 
     async def buy(self, qty: int, price: Decimal):
         if self.order:

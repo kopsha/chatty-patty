@@ -3,14 +3,14 @@ from .metaflip import (
     QUARTER_RANGE,
     WEEK_RANGE,
     CandleStick,
-    DataclassEncoder,
+    ThinkEncoder,
     RenkoBrick,
 )
 from .tracer import PinkyTracker
 
 __all__ = [
     CandleStick,
-    DataclassEncoder,
+    ThinkEncoder,
     PinkyTracker,
     RenkoBrick,
     QUARTER_RANGE,

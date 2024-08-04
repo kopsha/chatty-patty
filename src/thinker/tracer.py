@@ -16,7 +16,7 @@ from matplotlib.patches import Patch, Rectangle
 from ta.volatility import average_true_range
 from ta.volume import on_balance_volume
 
-from .metaflip import FIBONACCI, QUARTER_RANGE, CandleStick, DataclassEncoder, RenkoBrick
+from .metaflip import FIBONACCI, QUARTER_RANGE, CandleStick, ThinkEncoder, RenkoBrick
 
 
 
@@ -67,7 +67,7 @@ class PinkyTracker:
         filepath = cache / self.data_filename
         with open(filepath, "wt") as datafile:
             data = list(self.data)
-            datafile.write(json.dumps(data, indent=4, cls=DataclassEncoder))
+            datafile.write(json.dumps(data, indent=4, cls=ThinkEncoder))
 
     @cached_property
     def window(self):
