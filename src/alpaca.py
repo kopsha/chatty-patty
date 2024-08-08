@@ -76,6 +76,22 @@ class AlpacaScavenger:
         chart_path = broker.feed(map(asdict, bars))
         return chart_path
 
+    async def track_and_trace(self):
+        symbol_charts = list()
+        ICON = dict(up="/", down="\\")
+        for bi in self.brokers:
+            chart = await self.refresh_broker(bi)
+            if chart:
+                events = bi.trac.strategy_eval()
+                if events:
+                    index, event = events[-1]
+                    if index == len(bi.trac.bricks):
+                        caption = f"{bi.symbol} is trending *{event}* // {bi.formatted_value()}"
+                        symbol_charts.append((caption, chart))
+                        print(ICON[event], end="")
+        return symbol_charts
+
+
     def overview(self) -> str:
         lines = list()
 

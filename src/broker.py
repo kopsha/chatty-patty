@@ -1,4 +1,5 @@
 import json
+import math
 import os
 from collections import deque
 from datetime import datetime
@@ -47,7 +48,6 @@ class RenkoTracker:
     def read_from(self, cache: Path):
         filepath = cache / (self.filename + ".json")
         if not filepath.exists():
-            print(f"Symbol {self.symbol} has no cached data")
             return
 
         with open(filepath, "rt") as datafile:
@@ -60,7 +60,7 @@ class RenkoTracker:
 
     def write_to(self, cache: Path):
         if not self.data:
-            print("Nothing to write")
+            print("Nothing to cache for", self.symbol)
             return
 
         filepath = cache / (self.filename + ".json")
@@ -80,7 +80,6 @@ class RenkoTracker:
         )
 
         if not new_data:
-            print("Got an empty feed")
             return
 
         self.data.extend(new_data)
@@ -205,6 +204,38 @@ class RenkoTracker:
 
         return filepath
 
+    def strategy_eval(self):
+        def zone_log(x: int):
+            return int(math.log(x - 1, 3)) if x > 1 else 0
+
+        if not self.bricks:
+            print("no bricks, no strategy.")
+            return
+
+        REVERSE = dict(up="down", down="up")
+
+        trend = self.bricks[0].direction
+        strength = 0
+        breakout = 0
+        events = list()
+
+        for i, brick in enumerate(self.bricks):
+            if brick.direction == trend:
+                strength += 1
+                breakout = 0
+            else:
+                strength -= 1
+                breakout += 1
+
+            if breakout:
+                needed = zone_log(strength)
+                if breakout > needed:
+                    trend = REVERSE[trend]
+                    strength = breakout
+                    events.append((i + 1, trend))
+
+        return events
+
 
 class PositionBroker:
     """
@@ -264,7 +295,7 @@ class PositionBroker:
         chart_path = None
         if new_bricks:
             chart_path = self.trac.draw_chart(self.CHARTS_PATH)
-            print("Added", len(new_bricks), "bricks.")
+            print("b" * len(new_bricks), end="")
             self.trac.write_to(self.CACHE)
         return chart_path
 

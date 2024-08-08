@@ -79,23 +79,20 @@ class Seeker:
         )
         await self.patty.say(message)
 
-        symbol_charts = await self.alpaca.refresh_open_brokers()
-        for caption, chart in symbol_charts:
-            await self.patty.selfie(chart, caption=caption)
-
     async def on_stop(self):
         await self.alpaca.on_stop()
         await self.patty.on_stop()
 
     @error_resilient
     async def fast_task(self):
-        print(":", end="", flush=True)
+        print(".", end="", flush=True)
+        symbol_charts = await self.alpaca.track_and_trace()
+        for caption, chart in symbol_charts:
+            await self.patty.selfie(chart, caption=caption)
 
     @error_resilient
     async def background_task(self):
-        print(".", end="", flush=True)
-
-        data = await self.patty.get_updates(timeout=2)
+        data = await self.patty.get_updates(timeout=3)
         commands, system_commands, errors = self.patty.digest_updates(data)
 
         if errors:
