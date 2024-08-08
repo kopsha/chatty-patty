@@ -281,7 +281,7 @@ class PositionBroker:
         return self.qty * self.trac.current_price
 
     def formatted_value(self) -> str:
-        return f"*{self.symbol}*: {self.qty} x {self.trac.current_price:.2f} $ = *{self.market_value:.2f}* $"
+        return f"{self.qty} x {self.trac.current_price:.2f} $ = *{self.market_value:.2f}* $"
 
     def formatted_entry(self) -> str:
         return f"*{self.symbol}*: {self.qty} x {self.entry_price:.2f} $ = *{self.entry_cost:.2f}* $"
