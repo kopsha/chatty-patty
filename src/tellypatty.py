@@ -102,5 +102,6 @@ class TellyPatty:
             form.add_field("chat_id", str(self.chat_id))
             form.add_field("photo", image_file)
             form.add_field("caption", caption)
+            form.add_field("parse_mode", "markdown")
             response = await self.client.post(api_url, form_data=form)
         return response

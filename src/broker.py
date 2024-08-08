@@ -11,7 +11,7 @@ import pytz
 from alpaca_client import AlpacaClient, Order, OrderSide
 from matplotlib import pyplot as plt
 from matplotlib.patches import Patch, Rectangle
-from thinker import CandleStick, ThinkEncoder, RenkoBrick, RenkoState
+from thinker import CandleStick, RenkoBrick, RenkoState, ThinkEncoder
 
 
 class RenkoTracker:
@@ -243,7 +243,17 @@ class PositionBroker:
             self.symbol = symbol
 
     def __str__(self) -> str:
-        return f"*{self.symbol}* {self.qty} x {self.entry_price:.2f} $ = {self.entry_cost:.2f} $"
+        return f"*{self.symbol}*: {self.qty} x {self.trac.current_price:.2f} $ = *{self.market_value:.2f}* $"
+
+    @property
+    def market_value(self) -> Decimal:
+        return self.qty * self.trac.current_price
+
+    def formatted_value(self) -> str:
+        return f"*{self.symbol}*: {self.qty} x {self.trac.current_price:.2f} $ = *{self.market_value:.2f}* $"
+
+    def formatted_entry(self) -> str:
+        return f"*{self.symbol}*: {self.qty} x {self.entry_price:.2f} $ = *{self.entry_cost:.2f}* $"
 
     @property
     def entry_cost(self) -> Decimal:
@@ -251,10 +261,12 @@ class PositionBroker:
 
     def feed(self, data_points: list[dict]):
         new_bricks = self.trac.feed(data_points)
+        chart_path = None
         if new_bricks:
-            self.trac.draw_chart(self.CHARTS_PATH)
+            chart_path = self.trac.draw_chart(self.CHARTS_PATH)
             print("Added", len(new_bricks), "bricks.")
             self.trac.write_to(self.CACHE)
+        return chart_path
 
     async def buy(self, qty: int, price: Decimal):
         if self.order:

@@ -28,16 +28,6 @@ class AlpacaScavenger:
         self.positions = await self.client.fetch_open_positions()
         self.brokers = await self.make_brokers_for_open_positions()
 
-        for one in self.brokers:
-            # await self.replay_broker(one)
-            print()
-            print(f"------------ {one.symbol} ---- {one.trac.current_time} ------------------")
-            quotes = await self.client.fetch_quotes(one.symbol, one.trac.current_time)
-            for i, q in enumerate(quotes[:100]):
-                print(i, q)
-            print("full length is", len(quotes))
-            
-
     async def on_stop(self):
         await self.client.on_stop()
 
@@ -71,15 +61,20 @@ class AlpacaScavenger:
         ]
         return brokers
 
-    async def replay_broker(self, broker: PositionBroker):
+    async def refresh_open_brokers(self):
+        symbol_charts = list()
+        for bi in self.brokers:
+            chart = await self.refresh_broker(bi)
+            if chart:
+                symbol_charts.append((bi.formatted_value(), chart))
+        return symbol_charts
+
+    async def refresh_broker(self, broker: PositionBroker):
         bars = await self.client.fetch_bars(
             broker.symbol, broker.entry_time, interval="1T"
         )
-
-        for bar in bars:
-            # print("feeding")
-            # print(bar)
-            broker.feed([asdict(bar)])
+        chart_path = broker.feed(map(asdict, bars))
+        return chart_path
 
     def overview(self) -> str:
         lines = list()
