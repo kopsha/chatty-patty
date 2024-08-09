@@ -92,7 +92,7 @@ class Seeker:
 
     @error_resilient
     async def background_task(self):
-        data = await self.patty.get_updates(timeout=3)
+        data = await self.patty.get_updates(timeout=21)
         commands, system_commands, errors = self.patty.digest_updates(data)
 
         if errors:
