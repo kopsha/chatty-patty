@@ -4,7 +4,7 @@ import sys
 from dataclasses import asdict, dataclass, is_dataclass
 from datetime import datetime
 from decimal import Decimal
-from enum import IntEnum
+from enum import IntEnum, StrEnum, auto
 from typing import Any, ClassVar
 
 FIBONACCI = (1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233)
@@ -38,23 +38,6 @@ class ThinkEncoder(json.JSONEncoder):
 
 
 @dataclass
-class RenkoState:
-    high: Decimal
-    low: Decimal
-    abs_high: Decimal
-    abs_low: Decimal
-    last_index: datetime
-
-
-@dataclass
-class RenkoBrick:
-    timestamp: int
-    open: Decimal
-    close: Decimal
-    direction: str
-
-
-@dataclass
 class CandleStick:
     AS_DTYPE: ClassVar[dict[str, str]] = dict(
         open="float",
@@ -74,6 +57,28 @@ class CandleStick:
     volume: Decimal
     trades: int
     vw_price: Decimal
+
+
+class Trend(StrEnum):
+    UP = auto()
+    DOWN = auto()
+
+
+@dataclass
+class RenkoBrick:
+    timestamp: datetime
+    open: Decimal
+    close: Decimal
+    direction: Trend
+
+
+@dataclass
+class RenkoState:
+    high: Decimal
+    low: Decimal
+    abs_high: Decimal
+    abs_low: Decimal
+    last_index: datetime
 
 
 class MarketSignal(IntEnum):

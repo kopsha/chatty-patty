@@ -156,16 +156,16 @@ class Bar:
 
 @dataclass
 class Position:
-    asset_id: UUID
     symbol: str
-    side: str
     qty: int
-    qty_available: int
-    market_value: Decimal
-    current_price: Decimal
-    lastday_price: Decimal
-    unrealized_pl: Decimal
-    unrealized_plpc: Decimal
+    # asset_id: UUID
+    # side: str
+    # qty_available: int
+    # market_value: Decimal
+    # current_price: Decimal
+    # lastday_price: Decimal
+    # unrealized_pl: Decimal
+    # unrealized_plpc: Decimal
 
     @classmethod
     def from_alpaca(cls: Self, data: SimpleNamespace):
@@ -236,7 +236,7 @@ class AlpacaClient:
         api_url = self.API_ROOT.format(group="api", method="v2/orders")
         await self.client.delete(api_url + "/" + str(by_id))
 
-    async def fetch_open_positions(self):
+    async def fetch_open_positions(self) -> list[Position]:
         api_url = self.API_ROOT.format(group="api", method="v2/positions")
         response = await self.client.get(api_url)
         positions = [Position.from_alpaca(data) for data in response]
@@ -284,7 +284,7 @@ class AlpacaClient:
         symbols = [data.symbol for data in response.most_actives]
         return symbols
 
-    async def fetch_quotes(self, symbol: str, since: datetime):
+    async def fetch_quotes(self, symbol: str, since: datetime) -> list[Quote]:
         api_url = self.API_ROOT.format(group="data", method="v2/stocks/quotes")
         query = dict(
             feed="iex",
@@ -306,19 +306,20 @@ class AlpacaClient:
 
         return quotes
 
-    async def fetch_latest_quote(self, symbol: str):
+    async def fetch_latest_quote(self, symbol: str) -> Quote | None:
         api_url = self.API_ROOT.format(group="data", method="v2/stocks/quotes/latest")
         query = dict(
             feed="iex",
             symbols=symbol,
         )
         response = await self.client.get(api_url, params=query)
-        quotes = list()
         if vars(response.quotes):
             data = getattr(response.quotes, symbol)
-            quotes.append(Quote.from_alpaca(data))
+            quote = Quote.from_alpaca(data)
+        else:
+            quote = None
 
-        return quotes
+        return quote
 
     async def fetch_bars(self, symbol: str, since: datetime, interval: str = "30T"):
         api_url = self.API_ROOT.format(group="data", method="v2/stocks/bars")

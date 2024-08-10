@@ -86,13 +86,16 @@ class Seeker:
     @error_resilient
     async def fast_task(self):
         print(".", end="", flush=True)
-        symbol_charts = await self.alpaca.track_and_trace()
-        for caption, chart in symbol_charts:
+        traces = await self.alpaca.track_and_trace()
+        for caption, chart, close_message in traces:
+            print(caption, chart, close_message)
             await self.patty.selfie(chart, caption=caption)
+            if close_message:
+                await self.patty.say(close_message)
 
     @error_resilient
     async def background_task(self):
-        data = await self.patty.get_updates(timeout=21)
+        data = await self.patty.get_updates(timeout=3)
         commands, system_commands, errors = self.patty.digest_updates(data)
 
         if errors:
@@ -144,7 +147,7 @@ class Seeker:
             await self._open_session()
 
         async with pretty_go("setup async tasks"):
-            self.scheduler.add_job(self.fast_task, "interval", minutes=5)
+            self.scheduler.add_job(self.fast_task, "interval", minutes=1)
             self.scheduler.add_job(self.hourly, "interval", hours=1)
             task = asyncio.create_task(self._loop())
             self.scheduler.start()

@@ -1,12 +1,12 @@
+import math
 import os
 from copy import deepcopy
 from dataclasses import asdict
-from decimal import Decimal
 from functools import cached_property
 from pathlib import Path
 
-from alpaca_client import AlpacaClient, OrderStatus
-from broker import PositionBroker
+from alpaca_client import AlpacaClient, OrderSide, OrderStatus, Position
+from broker import TREND_ICON, PositionBroker
 
 
 class AlpacaScavenger:
@@ -31,6 +31,19 @@ class AlpacaScavenger:
     async def on_stop(self):
         await self.client.on_stop()
 
+    async def refresh_spreads(self):
+        print()
+        for pos in self.positions:
+            if quote := await self.client.fetch_latest_quote(pos.symbol):
+                if quote.ask_size and quote.bid_size:
+                    spread = (quote.ask_price - quote.bid_price) * 100 / quote.ask_price
+                else:
+                    spread = math.inf
+
+                print(f"{pos.symbol}: Spread {spread:.2f} %, {quote}")
+            else:
+                print(f"\t{pos.symbol}: no quote")
+
     async def update_market_clock(self):
         self.market_clock = await self.client.fetch_market_clock()
 
@@ -43,10 +56,14 @@ class AlpacaScavenger:
 
         entry_orders = list()
         positions = deepcopy(self.positions)
+        positions = [Position(symbol="SERV", qty=1)]
+
         for pos in positions:
             qty = pos.qty
             related_orders = filter(
-                lambda o: o.symbol == pos.symbol and o.status == OrderStatus.FILLED,
+                lambda o: o.symbol == pos.symbol
+                and o.status == OrderStatus.FILLED
+                and o.side == OrderSide.BUY,
                 orders,
             )
             while qty:
@@ -54,46 +71,32 @@ class AlpacaScavenger:
                 entry_orders.append(order)
                 qty -= order.qty
 
-        bs = dict(NCNC=Decimal("0.015"), SERV=Decimal("0.859"))
-        brokers = [
-            PositionBroker(self.client, order=o, brick_size=bs[o.symbol])
-            for o in entry_orders
-        ]
+        brokers = [PositionBroker(self.client, order=o) for o in entry_orders]
         return brokers
 
-    async def refresh_open_brokers(self):
-        symbol_charts = list()
-        for bi in self.brokers:
-            chart = await self.refresh_broker(bi)
-            if chart:
-                symbol_charts.append((bi.formatted_value(), chart))
-        return symbol_charts
-
-    async def refresh_broker(self, broker: PositionBroker):
-        bars = await self.client.fetch_bars(
-            broker.symbol, broker.entry_time, interval="1T"
-        )
-        chart_path = broker.feed(map(asdict, bars))
-        return chart_path
-
     async def track_and_trace(self):
-        symbol_charts = list()
-        ICON = dict(up="/", down="\\")
-        UNICODE_ICON = dict(up="↑", down="↓")
-        for bi in self.brokers:
-            chart = await self.refresh_broker(bi)
+        traces = list()
+
+        for broker in self.brokers:
+            bars = await self.client.fetch_bars(
+                broker.symbol, broker.current_time, interval="1T"
+            )
+
+            broker.trac.update_brick_size(list(map(asdict, bars))[:30])
+
+            events, chart, closed = await broker.feed_and_act(map(asdict, bars))
+            for event in events:
+                print(TREND_ICON[event], end="")
+
+            message = (
+                f"Downtrend breakout triggered exit at {broker.exit_price}"
+                if closed
+                else None
+            )
             if chart:
-                events = bi.trac.strategy_eval()
-                if events:
-                    index, event = events[-1]
-                    if index == len(bi.trac.bricks):
-                        caption = (
-                            f"*{bi.symbol}* is trending *{event.title()}* "
-                            f"{UNICODE_ICON[event]}  \n ∑ {bi.formatted_value()}"
-                        )
-                        symbol_charts.append((caption, chart))
-                        print(ICON[event], end="")
-        return symbol_charts
+                traces.append((broker.formatted_value(), chart, message))
+
+        return traces
 
     def overview(self) -> str:
         lines = list()

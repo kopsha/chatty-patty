@@ -1,6 +1,7 @@
 import json
 import math
 import os
+from abc import ABC, abstractmethod
 from collections import deque
 from datetime import datetime
 from decimal import Decimal
@@ -12,26 +13,32 @@ import pytz
 from alpaca_client import AlpacaClient, Order, OrderSide
 from matplotlib import pyplot as plt
 from matplotlib.patches import Patch, Rectangle
-from thinker import CandleStick, RenkoBrick, RenkoState, ThinkEncoder
+from thinker import CandleStick, RenkoBrick, RenkoState, ThinkEncoder, Trend
+
+REVERSE = {Trend.UP: Trend.DOWN, Trend.DOWN: Trend.UP}
+TREND_ICON = {Trend.UP: "↑", Trend.DOWN: "↓", None: "_"}
 
 
-class RenkoTracker:
+class OpenPositionTracker(ABC):
+    """Follows with minute candlesticks an open position, until exit sale"""
+
+    @abstractmethod
+    def feed(self, data_points: list[dict]) -> list[Trend | None]:
+        """Given a list of candlestick, applies the strategy and return events"""
+        pass
+
+
+class RenkoTracker(OpenPositionTracker):
     MAXLEN = 15 * 30  # Minutes of typical market day
     PRECISION = 3
 
-    def __init__(
-        self,
-        symbol: str,
-        entry_price: Decimal,
-        entry_time: datetime,
-        brick_size: Decimal,
-    ):
+    def __init__(self, symbol: str, entry_price: Decimal, entry_time: datetime):
         self.symbol = symbol
         self.entry_price = entry_price
         self.current_price = entry_price
         self.data: deque[CandleStick] = deque(maxlen=self.MAXLEN)
         self.current_time = entry_time
-        self.brick_size = brick_size
+        self.brick_size = 0
         self.renko_state = RenkoState(
             high=entry_price,
             abs_high=entry_price,
@@ -40,6 +47,119 @@ class RenkoTracker:
             last_index=entry_time,
         )
         self.bricks = list()
+        self.trend = None
+        self.strength = 0
+        self.breakout = 0
+
+    def update_brick_size(self, from_data: list[dict], window: int = 13) -> float:
+        absolute_range = max(x["high"] - x["low"] for x in from_data[-window:])
+        self.brick_size = Decimal(absolute_range / 2.0).quantize(Decimal(".001"))
+        return self.brick_size
+
+    def feed(self, data_points: list[dict]) -> list[Trend | None]:
+        events = list()
+        new_bricks = self.renko_feed(data_points)
+
+        print()
+        for brick in new_bricks:
+            self.bricks.append(brick)
+            event = self.strategy_eval(brick)
+            print(event)
+            events.append(event)
+        print("gata")
+        return events
+
+    def strategy_eval(self, brick: RenkoBrick) -> Trend | None:
+        def zone_log(x: int):
+            return int(math.log(x - 1, 3)) if x > 1 else 0
+
+        if self.trend is None:
+            self.trend = brick.direction
+
+        if brick.direction == self.trend:
+            self.strength += 1
+            self.breakout = 0
+        else:
+            self.strength -= 1
+            self.breakout += 1
+
+        event = None
+        if self.breakout:
+            needed = zone_log(self.strength)
+            if self.breakout > needed:
+                self.trend = REVERSE[self.trend]
+                self.strength = self.breakout
+                event = self.trend
+
+        return event
+
+    def renko_feed(self, data_points: list[dict]) -> list[RenkoBrick]:
+        last_ts = int(self.current_time.timestamp())
+        new_data = list(
+            CandleStick(**x) for x in data_points if x["timestamp"] > last_ts
+        )
+
+        if not new_data:
+            return []
+
+        self.data.extend(new_data)
+        self.current_price = new_data[-1].close
+        ts = datetime.fromtimestamp(new_data[-1].timestamp)
+        self.current_time = pytz.utc.localize(ts)
+
+        # prepare data frame for bricks computation
+        df = pd.DataFrame(new_data).astype(CandleStick.AS_DTYPE)
+        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
+        df.set_index("timestamp", inplace=True)
+
+        # compute bricks from new data
+        bricks = list()
+        for row in df.itertuples():
+            new_bricks = self.digest_data_point(row)
+            bricks.extend(new_bricks)
+
+        return bricks
+
+    def digest_data_point(self, row: tuple):
+        new_bricks = list()
+
+        if row.close >= self.renko_state.high + self.brick_size:
+            # build bullish bricks
+            while row.close >= self.renko_state.high + self.brick_size:
+                new_bricks.append(
+                    RenkoBrick(
+                        self.renko_state.last_index,
+                        self.renko_state.high,
+                        self.renko_state.high + self.brick_size,
+                        Trend.UP,
+                    )
+                )
+                self.renko_state.last_index = row.Index
+                self.renko_state.low = self.renko_state.high
+                self.renko_state.high += self.brick_size
+                self.renko_state.abs_high = max(
+                    self.renko_state.high, self.renko_state.abs_high
+                )
+
+        elif row.close <= self.renko_state.low - self.brick_size:
+            # build bearish bricks
+            while row.close <= self.renko_state.low - self.brick_size:
+                new_bricks.append(
+                    RenkoBrick(
+                        self.renko_state.last_index,
+                        self.renko_state.low,
+                        self.renko_state.low - self.brick_size,
+                        Trend.DOWN,
+                    )
+                )
+                self.renko_state.last_index = row.Index
+                self.renko_state.high = self.renko_state.low
+                self.renko_state.low -= self.brick_size
+                self.renko_state.abs_low = min(
+                    self.renko_state.low, self.renko_state.abs_low
+                )
+
+        return new_bricks
 
     @cached_property
     def filename(self) -> str:
@@ -73,75 +193,6 @@ class RenkoTracker:
                     data[k] = v
             datafile.write(json.dumps(data, indent=4, cls=ThinkEncoder))
 
-    def feed(self, data_points: list[dict]):
-        last_ts = int(self.current_time.timestamp())
-        new_data = list(
-            CandleStick(**x) for x in data_points if x["timestamp"] > last_ts
-        )
-
-        if not new_data:
-            return
-
-        self.data.extend(new_data)
-        self.current_price = new_data[-1].close
-        ts = datetime.fromtimestamp(new_data[-1].timestamp)
-        self.current_time = pytz.utc.localize(ts)
-
-        # prepare data frame for bricks computation
-        df = pd.DataFrame(new_data).astype(CandleStick.AS_DTYPE)
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
-        df.set_index("timestamp", inplace=True)
-
-        # compute bricks from new data
-        bricks = list()
-        for row in df.itertuples():
-            new_bricks = self.digest_row(row)
-            bricks.extend(new_bricks)
-
-        self.bricks.extend(bricks)
-        return bricks
-
-    def digest_row(self, row):
-        new_bricks = list()
-
-        if row.close >= self.renko_state.high + self.brick_size:
-            # build bullish bricks
-            while row.close >= self.renko_state.high + self.brick_size:
-                new_bricks.append(
-                    RenkoBrick(
-                        self.renko_state.last_index,
-                        self.renko_state.high,
-                        self.renko_state.high + self.brick_size,
-                        "up",
-                    )
-                )
-                self.renko_state.last_index = row.Index
-                self.renko_state.low = self.renko_state.high
-                self.renko_state.high += self.brick_size
-                self.renko_state.abs_high = max(
-                    self.renko_state.high, self.renko_state.abs_high
-                )
-
-        elif row.close <= self.renko_state.low - self.brick_size:
-            # build bearish bricks
-            while row.close <= self.renko_state.low - self.brick_size:
-                new_bricks.append(
-                    RenkoBrick(
-                        self.renko_state.last_index,
-                        self.renko_state.low,
-                        self.renko_state.low - self.brick_size,
-                        "down",
-                    )
-                )
-                self.renko_state.last_index = row.Index
-                self.renko_state.high = self.renko_state.low
-                self.renko_state.low -= self.brick_size
-                self.renko_state.abs_low = min(
-                    self.renko_state.low, self.renko_state.abs_low
-                )
-
-        return new_bricks
-
     def draw_chart(self, to_folder: Path):
         if not self.data:
             print("No data to chart")
@@ -150,7 +201,7 @@ class RenkoTracker:
         fig, ax = plt.subplots(figsize=(21, 13))
         timestamps = list()
         for i, brick in enumerate(self.bricks):
-            if brick.direction == "up":
+            if brick.direction == Trend.UP:
                 rect = Rectangle(
                     (i, brick.open),
                     1,
@@ -204,38 +255,6 @@ class RenkoTracker:
 
         return filepath
 
-    def strategy_eval(self):
-        def zone_log(x: int):
-            return int(math.log(x - 1, 3)) if x > 1 else 0
-
-        if not self.bricks:
-            print("no bricks, no strategy.")
-            return
-
-        REVERSE = dict(up="down", down="up")
-
-        trend = self.bricks[0].direction
-        strength = 0
-        breakout = 0
-        events = list()
-
-        for i, brick in enumerate(self.bricks):
-            if brick.direction == trend:
-                strength += 1
-                breakout = 0
-            else:
-                strength -= 1
-                breakout += 1
-
-            if breakout:
-                needed = zone_log(strength)
-                if breakout > needed:
-                    trend = REVERSE[trend]
-                    strength = breakout
-                    events.append((i + 1, trend))
-
-        return events
-
 
 class PositionBroker:
     """
@@ -250,38 +269,31 @@ class PositionBroker:
     def __init__(
         self,
         client: AlpacaClient,
-        brick_size: Decimal,
-        symbol: str | None = None,
-        order: Order | None = None,
+        order: Order,
     ):
         self.client = client
-        self.order: Order | None = None
-        self.qty = 0
-        self.entry_price = Decimal()
-        self.trac: RenkoTracker | None = None
-
-        if order:
-            self.order = order
-            self.symbol = order.symbol
-            self.qty = order.filled_qty
-            self.entry_price = order.filled_avg_price
-            self.entry_time = order.submitted_at
-            self.trac = RenkoTracker(
-                self.symbol, self.entry_price, self.entry_time, brick_size=brick_size
-            )
-            self.trac.read_from(self.CACHE)
-        else:
-            self.symbol = symbol
+        self.order = order
+        self.symbol = order.symbol
+        self.qty = order.filled_qty
+        self.entry_price = order.filled_avg_price
+        self.exit_price = None
+        self.entry_time = order.submitted_at
+        self.trac = RenkoTracker(self.symbol, self.entry_price, self.entry_time)
+        self.trac.read_from(self.CACHE)
 
     def __str__(self) -> str:
         return f"*{self.symbol}*: {self.qty} x {self.trac.current_price:.2f} $ = *{self.market_value:.2f}* $"
+
+    @property
+    def current_time(self):
+        return self.trac.current_time
 
     @property
     def market_value(self) -> Decimal:
         return self.qty * self.trac.current_price
 
     def formatted_value(self) -> str:
-        return f"{self.qty} x {self.trac.current_price:.2f} $ = *{self.market_value:.2f}* $"
+        return f"*{self.symbol}: {self.qty} x {self.trac.current_price:.2f} $ = *{self.market_value:.2f}* $"
 
     def formatted_entry(self) -> str:
         return f"*{self.symbol}*: {self.qty} x {self.entry_price:.2f} $ = *{self.entry_cost:.2f}* $"
@@ -290,14 +302,31 @@ class PositionBroker:
     def entry_cost(self) -> Decimal:
         return self.qty * self.entry_price
 
-    def feed(self, data_points: list[dict]):
-        new_bricks = self.trac.feed(data_points)
+    async def feed_and_act(
+        self, data_points: list[dict]
+    ) -> tuple[list, Path | None, bool]:
+        events = self.trac.feed(data_points)
+
         chart_path = None
-        if new_bricks:
+        closed = False
+        if events:
             chart_path = self.trac.draw_chart(self.CHARTS_PATH)
-            print("b" * len(new_bricks), end="")
             self.trac.write_to(self.CACHE)
-        return chart_path
+
+            last_event = None
+            for ev in filter(lambda x: x, reversed(events)):
+                last_event = ev
+
+            if last_event == Trend.DOWN:
+                print()
+                print(
+                    "Downtrend breakout, exiting position at",
+                    self.trac.current_price,
+                    "$",
+                )
+                closed = await self.sell(self.trac.current_price)
+
+        return events, chart_path, closed
 
     async def buy(self, qty: int, price: Decimal):
         if self.order:
@@ -307,6 +336,9 @@ class PositionBroker:
         )
 
     async def sell(self, price: Decimal):
+        print("faking sell", price)
+        self.exit_price = price
+        return True
         if self.order:
             await self.client.cancel_order(self.order.id)
         self.order = await self.client.limit_order(
