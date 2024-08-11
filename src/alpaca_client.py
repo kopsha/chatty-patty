@@ -321,7 +321,9 @@ class AlpacaClient:
 
         return quote
 
-    async def fetch_bars(self, symbol: str, since: datetime, interval: str = "30T"):
+    async def fetch_bars(
+        self, symbol: str, since: datetime, interval: str = "30T"
+    ) -> list[Bar]:
         api_url = self.API_ROOT.format(group="data", method="v2/stocks/bars")
         query = dict(
             feed="iex",

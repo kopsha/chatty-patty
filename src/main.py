@@ -77,7 +77,8 @@ class Seeker:
                 *self.alpaca.overview(),
             )
         )
-        await self.patty.say(message)
+        # await self.patty.say(message)
+        await self.alpaca.select_affordable_stocks()
 
     async def on_stop(self):
         await self.alpaca.on_stop()

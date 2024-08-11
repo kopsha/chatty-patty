@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 import json
 import sys
-from dataclasses import asdict, dataclass, is_dataclass
+from dataclasses import asdict, dataclass, fields, is_dataclass
 from datetime import datetime
 from decimal import Decimal
 from enum import IntEnum, StrEnum, auto
-from typing import Any, ClassVar
+from types import SimpleNamespace
+from typing import Any, ClassVar, Self
 
 FIBONACCI = (1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233)
 # for 30 mins candlesticks
@@ -54,9 +55,20 @@ class CandleStick:
     high: Decimal
     low: Decimal
     close: Decimal
-    volume: Decimal
-    trades: int
-    vw_price: Decimal
+    volume: Decimal = Decimal()
+    trades: int = 0
+    vw_price: Decimal = Decimal()
+
+    @classmethod
+    def from_bar(cls: Self, data: SimpleNamespace):
+        valid_fields = {f.name: f.type for f in fields(cls)}
+        valid_data = dict()
+        for k, v in vars(data).items():
+            if v and k in valid_fields:
+                typed = valid_fields[k]
+                typed_value = typed(v)
+                valid_data[k] = typed_value
+        return cls(**valid_data)
 
 
 class Trend(StrEnum):
@@ -68,6 +80,8 @@ class Trend(StrEnum):
 class RenkoBrick:
     timestamp: datetime
     open: Decimal
+    high: Decimal
+    low: Decimal
     close: Decimal
     direction: Trend
 
@@ -79,6 +93,8 @@ class RenkoState:
     abs_high: Decimal
     abs_low: Decimal
     last_index: datetime
+    int_high: Decimal
+    int_low: Decimal
 
 
 class MarketSignal(IntEnum):

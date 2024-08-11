@@ -2,15 +2,18 @@ import math
 import os
 from copy import deepcopy
 from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 from functools import cached_property
 from pathlib import Path
 
 from alpaca_client import AlpacaClient, OrderSide, OrderStatus, Position
-from broker import TREND_ICON, PositionBroker
+from broker import TREND_ICON, PositionBroker, RenkoTracker
+from thinker import CandleStick
 
 
 class AlpacaScavenger:
     CACHE = Path(os.getenv("PRIVATE_CACHE", "."))
+    CHARTS_PATH = Path(os.getenv("OUTPUTS_PATH", "charts"))
 
     def __init__(self, api_key: str, secret):
         self.client = AlpacaClient(api_key, secret)
@@ -98,20 +101,47 @@ class AlpacaScavenger:
 
         return traces
 
-    def overview(self) -> str:
+    def overview(self) -> list[str]:
         lines = list()
-
         market_status = "Open" if self.market_clock.is_open else "Closed"
         lines.append(f"Market is {market_status}.")
         lines.append("--- Open positions ---")
-
         lines.extend(str(bi) for bi in self.brokers)
-
         lines.append("--- Account totals ---")
         lines.append(f"Portfolio value: *{self.account.portfolio_value:9.2f}* $")
         lines.append(f"Cash:                  *{self.account.cash:9.2f}* $")
-
         return lines
+
+    async def select_affordable_stocks(self):
+        weeks_ago = datetime.now(timezone.utc) - timedelta(days=7*7)
+        symbols = await self.client.fetch_most_active()
+        affordable = list()
+        for symbol in symbols:
+            bars = await self.client.fetch_bars(
+                symbol, since=weeks_ago, interval="1D"
+            )
+            last = bars[-1]
+            if last.high < self.account.cash:
+                affordable.append((symbol, bars))
+
+        for symbol, bars in affordable:
+            # past weeks tracker / might not use it
+            first = CandleStick.from_bar(bars[0])
+            entry_time = datetime.fromtimestamp(first.timestamp)
+            trac = RenkoTracker(symbol, first.open, entry_time, interval="1d")
+            trac.update_brick_size(list(map(asdict, bars)))
+            trac.feed(map(asdict, bars))
+            trac.draw_chart(self.CHARTS_PATH)
+
+            # read last day or two
+            friday = datetime.now(timezone.utc) - timedelta(days=3)
+            day_bars = await self.client.fetch_bars(symbol, friday, interval="1T")
+            first = CandleStick.from_bar(day_bars[0])
+            entry_time = datetime.fromtimestamp(first.timestamp)
+            day_trac = RenkoTracker(symbol, first.open, entry_time, interval="1m")
+            day_trac.update_brick_size(list(map(asdict, day_bars)))
+            day_trac.feed(map(asdict, day_bars))
+            day_trac.draw_chart(self.CHARTS_PATH)
 
     @cached_property
     def known_commands(self):

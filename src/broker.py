@@ -32,8 +32,9 @@ class RenkoTracker(OpenPositionTracker):
     MAXLEN = 15 * 30  # Minutes of typical market day
     PRECISION = 3
 
-    def __init__(self, symbol: str, entry_price: Decimal, entry_time: datetime):
+    def __init__(self, symbol: str, entry_price: Decimal, entry_time: datetime, interval="1m"):
         self.symbol = symbol
+        self.interval = interval
         self.entry_price = entry_price
         self.current_price = entry_price
         self.data: deque[CandleStick] = deque(maxlen=self.MAXLEN)
@@ -45,6 +46,8 @@ class RenkoTracker(OpenPositionTracker):
             low=entry_price,
             abs_low=entry_price,
             last_index=entry_time,
+            int_high=entry_price,
+            int_low=entry_price,
         )
         self.bricks = list()
         self.trend = None
@@ -60,13 +63,10 @@ class RenkoTracker(OpenPositionTracker):
         events = list()
         new_bricks = self.renko_feed(data_points)
 
-        print()
         for brick in new_bricks:
             self.bricks.append(brick)
             event = self.strategy_eval(brick)
-            print(event)
             events.append(event)
-        print("gata")
         return events
 
     def strategy_eval(self, brick: RenkoBrick) -> Trend | None:
@@ -128,17 +128,21 @@ class RenkoTracker(OpenPositionTracker):
             while row.close >= self.renko_state.high + self.brick_size:
                 new_bricks.append(
                     RenkoBrick(
-                        self.renko_state.last_index,
-                        self.renko_state.high,
-                        self.renko_state.high + self.brick_size,
-                        Trend.UP,
+                        timestamp=self.renko_state.last_index,
+                        open=self.renko_state.high,
+                        high=self.renko_state.int_high,
+                        low=self.renko_state.int_low,
+                        close=self.renko_state.high + self.brick_size,
+                        direction=Trend.UP,
                     )
                 )
                 self.renko_state.last_index = row.Index
                 self.renko_state.low = self.renko_state.high
                 self.renko_state.high += self.brick_size
+                self.renko_state.int_high = max(self.renko_state.high, row.high)
+                self.renko_state.int_low = min(self.renko_state.low, row.low)
                 self.renko_state.abs_high = max(
-                    self.renko_state.high, self.renko_state.abs_high
+                    self.renko_state.int_high, self.renko_state.abs_high
                 )
 
         elif row.close <= self.renko_state.low - self.brick_size:
@@ -146,24 +150,31 @@ class RenkoTracker(OpenPositionTracker):
             while row.close <= self.renko_state.low - self.brick_size:
                 new_bricks.append(
                     RenkoBrick(
-                        self.renko_state.last_index,
-                        self.renko_state.low,
-                        self.renko_state.low - self.brick_size,
-                        Trend.DOWN,
+                        timestamp=self.renko_state.last_index,
+                        open=self.renko_state.low,
+                        high=self.renko_state.int_high,
+                        low=self.renko_state.int_low,
+                        close=self.renko_state.low - self.brick_size,
+                        direction=Trend.DOWN,
                     )
                 )
                 self.renko_state.last_index = row.Index
                 self.renko_state.high = self.renko_state.low
                 self.renko_state.low -= self.brick_size
+                self.renko_state.int_high = max(self.renko_state.high, row.high)
+                self.renko_state.int_low = min(self.renko_state.low, row.low)
                 self.renko_state.abs_low = min(
-                    self.renko_state.low, self.renko_state.abs_low
+                    self.renko_state.int_low, self.renko_state.abs_low
                 )
+        else:
+            self.renko_state.int_high = max(self.renko_state.int_high, row.high)
+            self.renko_state.int_low = min(self.renko_state.int_high, row.low)
 
         return new_bricks
 
     @cached_property
     def filename(self) -> str:
-        return f"{self.symbol}-1m-{self.MAXLEN}p"
+        return f"{self.symbol}-{self.interval}-{self.MAXLEN}p"
 
     def read_from(self, cache: Path):
         filepath = cache / (self.filename + ".json")
