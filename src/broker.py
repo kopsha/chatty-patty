@@ -7,6 +7,9 @@ from datetime import datetime
 from decimal import Decimal
 from functools import cached_property
 from pathlib import Path
+from statistics import harmonic_mean, mean, median
+from types import SimpleNamespace
+from typing import Type
 
 import pandas as pd
 import pytz
@@ -24,7 +27,7 @@ class OpenPositionTracker(ABC):
     """Follows with minute candlesticks an open position, until exit sale"""
 
     @abstractmethod
-    def feed(self, data_points: list[dict]) -> list[Trend | None]:
+    def feed(self, sticks: list[CandleStick]) -> list[Trend | None]:
         """Given a list of candlestick, applies the strategy and return events"""
         pass
 
@@ -32,6 +35,15 @@ class OpenPositionTracker(ABC):
 class RenkoTracker(OpenPositionTracker):
     MAXLEN = 15 * 30  # Minutes of typical market day
     PRECISION = 3
+
+    @classmethod
+    def from_bars(cls: Type, symbol: str, bars: list, interval: str):
+        sticks = [CandleStick.from_bar(bi) for bi in bars]
+        entry_time = datetime.fromtimestamp(sticks[0].timestamp)
+        instance = cls(symbol, sticks[0].open, entry_time, interval=interval)
+        instance.update_brick_size(sticks)
+        instance.feed(sticks)
+        return instance
 
     def __init__(
         self, symbol: str, entry_price: Decimal, entry_time: datetime, interval="1m"
@@ -57,15 +69,20 @@ class RenkoTracker(OpenPositionTracker):
         self.strength = 0
         self.breakout = 0
 
-    def update_brick_size(self, from_data: list[dict], window: int = 13) -> float:
-        absolute_range = max(x["high"] - x["low"] for x in from_data[-window:])
-        self.brick_size = Decimal(absolute_range / 2.0).quantize(Decimal(".001"))
+    def update_brick_size(self, from_sticks: list) -> Decimal:
+        absolute_range = list(x.high - x.low for x in from_sticks)
+        middle = max(median(absolute_range), 0.001)
+        self.brick_size = Decimal(middle).quantize(Decimal(".001"))
         return self.brick_size
 
-    def feed(self, data_points: list[dict]) -> list[Trend | None]:
-        events = list()
-        new_bricks = self.renko_feed(data_points)
+    def feed(self, sticks: list[CandleStick]) -> list[Trend | None]:
+        current_ts = int(self.current_time.timestamp())
+        newer_sticks = [sti for sti in sticks if sti.timestamp > current_ts]
+        if not newer_sticks:
+            return []
 
+        events = list()
+        new_bricks = self.renko_feed(newer_sticks)
         for brick in new_bricks:
             self.bricks.append(brick)
             event = self.strategy_eval(brick)
@@ -96,15 +113,7 @@ class RenkoTracker(OpenPositionTracker):
 
         return event
 
-    def renko_feed(self, data_points: list[dict]) -> list[RenkoBrick]:
-        last_ts = int(self.current_time.timestamp())
-        new_data = list(
-            CandleStick(**x) for x in data_points if x["timestamp"] > last_ts
-        )
-
-        if not new_data:
-            return []
-
+    def renko_feed(self, new_data: list[CandleStick]) -> list[RenkoBrick]:
         self.data.extend(new_data)
         self.current_price = new_data[-1].close
         ts = datetime.fromtimestamp(new_data[-1].timestamp)
@@ -123,7 +132,7 @@ class RenkoTracker(OpenPositionTracker):
 
         return bricks
 
-    def digest_data_point(self, row: tuple):
+    def digest_data_point(self, row: CandleStick):
         new_bricks = list()
 
         self.renko_state.int_high = max(self.renko_state.int_high, Decimal(row.high))
@@ -336,9 +345,9 @@ class PositionBroker:
         return self.qty * self.entry_price
 
     async def feed_and_act(
-        self, data_points: list[dict]
+        self, bars: list[SimpleNamespace]
     ) -> tuple[list, Path | None, bool]:
-        events = self.trac.feed(data_points)
+        events = self.trac.feed(CandleStick.from_bar(bi) for bi in bars)
 
         chart_path = None
         closed = False

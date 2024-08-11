@@ -84,14 +84,12 @@ class AlpacaScavenger:
                 broker.symbol, broker.current_time, interval="1T"
             )
 
-            broker.trac.update_brick_size(list(map(asdict, bars))[:30])
-
-            events, chart, closed = await broker.feed_and_act(map(asdict, bars))
+            events, chart, closed = await broker.feed_and_act(bars)
             for event in events:
                 print(TREND_ICON[event], end="")
 
             message = (
-                f"Downtrend breakout triggered exit at {broker.exit_price}"
+                f"\n! Downtrend breakout triggered exit at {broker.exit_price}"
                 if closed
                 else None
             )
@@ -113,32 +111,25 @@ class AlpacaScavenger:
 
     async def select_affordable_stocks(self):
         weeks_ago = datetime.now(timezone.utc) - timedelta(days=7 * 7)
-        symbols = await self.client.fetch_most_active()
+        friday = datetime.now(timezone.utc) - timedelta(days=3)
+
         affordable = list()
-        for symbol in symbols:
+        most_active = await self.client.fetch_most_active()
+        for symbol in most_active:
             bars = await self.client.fetch_bars(symbol, since=weeks_ago, interval="30T")
             last = bars[-1]
             if last.high < self.account.cash:
                 affordable.append((symbol, bars))
 
         for symbol, bars in affordable:
-            # past weeks tracker / might not use it
-            first = CandleStick.from_bar(bars[0])
-            entry_time = datetime.fromtimestamp(first.timestamp)
-            trac = RenkoTracker(symbol, first.open, entry_time, interval="30m")
-            trac.update_brick_size(list(map(asdict, bars)))
-            trac.feed(map(asdict, bars))
-            trac.draw_chart(self.CHARTS_PATH)
-
-            # read last day or two
-            friday = datetime.now(timezone.utc) - timedelta(days=3)
-            day_bars = await self.client.fetch_bars(symbol, friday, interval="1T")
-            first = CandleStick.from_bar(day_bars[0])
-            entry_time = datetime.fromtimestamp(first.timestamp)
-            day_trac = RenkoTracker(symbol, first.open, entry_time, interval="1m")
-            day_trac.update_brick_size(list(map(asdict, day_bars)))
-            day_trac.feed(map(asdict, day_bars))
+            # read at least a full day of open market
+            minute_bars = await self.client.fetch_bars(symbol, friday, interval="1T")
+            day_trac = RenkoTracker.from_bars(symbol, minute_bars, interval="1m")
             day_trac.draw_chart(self.CHARTS_PATH)
+
+            # past weeks tracker / might not use it
+            week_trac = RenkoTracker.from_bars(symbol, bars, interval="30m")
+            week_trac.draw_chart(self.CHARTS_PATH)
 
     @cached_property
     def known_commands(self):

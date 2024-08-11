@@ -6,7 +6,7 @@ from datetime import datetime
 from decimal import Decimal
 from enum import IntEnum, StrEnum, auto
 from types import SimpleNamespace
-from typing import Any, ClassVar, Self
+from typing import Any, ClassVar, Type
 
 FIBONACCI = (1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233)
 # for 30 mins candlesticks
@@ -60,7 +60,7 @@ class CandleStick:
     vw_price: Decimal = Decimal()
 
     @classmethod
-    def from_bar(cls: Self, data: SimpleNamespace):
+    def from_bar(cls: Type, data: SimpleNamespace):
         valid_fields = {f.name: f.type for f in fields(cls)}
         valid_data = dict()
         for k, v in vars(data).items():
