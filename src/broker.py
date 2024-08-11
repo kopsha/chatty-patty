@@ -12,6 +12,7 @@ import pandas as pd
 import pytz
 from alpaca_client import AlpacaClient, Order, OrderSide
 from matplotlib import pyplot as plt
+from matplotlib.lines import Line2D
 from matplotlib.patches import Patch, Rectangle
 from thinker import CandleStick, RenkoBrick, RenkoState, ThinkEncoder, Trend
 
@@ -32,7 +33,9 @@ class RenkoTracker(OpenPositionTracker):
     MAXLEN = 15 * 30  # Minutes of typical market day
     PRECISION = 3
 
-    def __init__(self, symbol: str, entry_price: Decimal, entry_time: datetime, interval="1m"):
+    def __init__(
+        self, symbol: str, entry_price: Decimal, entry_time: datetime, interval="1m"
+    ):
         self.symbol = symbol
         self.interval = interval
         self.entry_price = entry_price
@@ -123,6 +126,9 @@ class RenkoTracker(OpenPositionTracker):
     def digest_data_point(self, row: tuple):
         new_bricks = list()
 
+        self.renko_state.int_high = max(self.renko_state.int_high, Decimal(row.high))
+        self.renko_state.int_low = min(self.renko_state.int_low, Decimal(row.low))
+
         if row.close >= self.renko_state.high + self.brick_size:
             # build bullish bricks
             while row.close >= self.renko_state.high + self.brick_size:
@@ -139,11 +145,11 @@ class RenkoTracker(OpenPositionTracker):
                 self.renko_state.last_index = row.Index
                 self.renko_state.low = self.renko_state.high
                 self.renko_state.high += self.brick_size
-                self.renko_state.int_high = max(self.renko_state.high, row.high)
-                self.renko_state.int_low = min(self.renko_state.low, row.low)
                 self.renko_state.abs_high = max(
                     self.renko_state.int_high, self.renko_state.abs_high
                 )
+            self.renko_state.int_high = Decimal(row.close)
+            self.renko_state.int_low = Decimal(row.close)
 
         elif row.close <= self.renko_state.low - self.brick_size:
             # build bearish bricks
@@ -161,14 +167,11 @@ class RenkoTracker(OpenPositionTracker):
                 self.renko_state.last_index = row.Index
                 self.renko_state.high = self.renko_state.low
                 self.renko_state.low -= self.brick_size
-                self.renko_state.int_high = max(self.renko_state.high, row.high)
-                self.renko_state.int_low = min(self.renko_state.low, row.low)
                 self.renko_state.abs_low = min(
                     self.renko_state.int_low, self.renko_state.abs_low
                 )
-        else:
-            self.renko_state.int_high = max(self.renko_state.int_high, row.high)
-            self.renko_state.int_low = min(self.renko_state.int_high, row.low)
+            self.renko_state.int_high = Decimal(row.close)
+            self.renko_state.int_low = Decimal(row.close)
 
         return new_bricks
 
@@ -211,7 +214,17 @@ class RenkoTracker(OpenPositionTracker):
 
         fig, ax = plt.subplots(figsize=(21, 13))
         timestamps = list()
+
         for i, brick in enumerate(self.bricks):
+            line = Line2D(
+                [i + 0.5, i + 0.5],
+                [brick.low, brick.high],
+                color="blue",
+                alpha=0.34,
+                linewidth=1,
+            )
+            ax.add_line(line)
+
             if brick.direction == Trend.UP:
                 rect = Rectangle(
                     (i, brick.open),
@@ -232,9 +245,10 @@ class RenkoTracker(OpenPositionTracker):
                 )
             ax.add_patch(rect)
             timestamps.append(brick.timestamp)
+
         timestamps.append(datetime.fromtimestamp(self.data[-1].timestamp))
 
-        # humanize the axes
+        # Humanize the axes
         major_ticks = list()
         major_labels = list()
         minor_ticks = list()
@@ -250,16 +264,18 @@ class RenkoTracker(OpenPositionTracker):
         ax.set_xticks(minor_ticks, minor=True)
         ax.set_ylim(
             [
-                self.renko_state.abs_low - self.brick_size / 3,
-                self.renko_state.abs_high + self.brick_size / 3,
+                self.renko_state.abs_low - self.brick_size / Decimal("3"),
+                self.renko_state.abs_high + self.brick_size / Decimal("3"),
             ]
         )
 
+        # Add the legend
         up_patch = Patch(color="forestgreen", label=f"Size {self.brick_size:.2f} $")
         down_patch = Patch(color="tomato", label=f"Size {self.brick_size:.2f} $")
         ax.legend(handles=[up_patch, down_patch], loc="lower left")
         ax.grid()
 
+        # Save the chart
         filepath = to_folder / (self.filename + "-renko.png")
         plt.savefig(filepath, bbox_inches="tight", dpi=300)
         plt.close()

@@ -59,7 +59,6 @@ class AlpacaScavenger:
 
         entry_orders = list()
         positions = deepcopy(self.positions)
-        positions = [Position(symbol="SERV", qty=1)]
 
         for pos in positions:
             qty = pos.qty
@@ -113,13 +112,11 @@ class AlpacaScavenger:
         return lines
 
     async def select_affordable_stocks(self):
-        weeks_ago = datetime.now(timezone.utc) - timedelta(days=7*7)
+        weeks_ago = datetime.now(timezone.utc) - timedelta(days=7 * 7)
         symbols = await self.client.fetch_most_active()
         affordable = list()
         for symbol in symbols:
-            bars = await self.client.fetch_bars(
-                symbol, since=weeks_ago, interval="1D"
-            )
+            bars = await self.client.fetch_bars(symbol, since=weeks_ago, interval="1D")
             last = bars[-1]
             if last.high < self.account.cash:
                 affordable.append((symbol, bars))
