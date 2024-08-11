@@ -314,7 +314,7 @@ class PositionBroker:
             self.trac.write_to(self.CACHE)
 
             last_event = None
-            for ev in filter(lambda x: x, reversed(events)):
+            for ev in filter(lambda x: x, events):
                 last_event = ev
 
             if last_event == Trend.DOWN:
