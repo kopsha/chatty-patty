@@ -116,7 +116,7 @@ class AlpacaScavenger:
         symbols = await self.client.fetch_most_active()
         affordable = list()
         for symbol in symbols:
-            bars = await self.client.fetch_bars(symbol, since=weeks_ago, interval="1D")
+            bars = await self.client.fetch_bars(symbol, since=weeks_ago, interval="30T")
             last = bars[-1]
             if last.high < self.account.cash:
                 affordable.append((symbol, bars))
@@ -125,7 +125,7 @@ class AlpacaScavenger:
             # past weeks tracker / might not use it
             first = CandleStick.from_bar(bars[0])
             entry_time = datetime.fromtimestamp(first.timestamp)
-            trac = RenkoTracker(symbol, first.open, entry_time, interval="1d")
+            trac = RenkoTracker(symbol, first.open, entry_time, interval="30m")
             trac.update_brick_size(list(map(asdict, bars)))
             trac.feed(map(asdict, bars))
             trac.draw_chart(self.CHARTS_PATH)

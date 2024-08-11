@@ -128,48 +128,54 @@ class RenkoTracker(OpenPositionTracker):
 
         self.renko_state.int_high = max(self.renko_state.int_high, Decimal(row.high))
         self.renko_state.int_low = min(self.renko_state.int_low, Decimal(row.low))
+        self.renko_state.abs_high = max(
+            self.renko_state.int_high, self.renko_state.abs_high
+        )
+        self.renko_state.abs_low = min(
+            self.renko_state.int_low, self.renko_state.abs_low
+        )
 
         if row.close >= self.renko_state.high + self.brick_size:
-            # build bullish bricks
-            while row.close >= self.renko_state.high + self.brick_size:
-                new_bricks.append(
-                    RenkoBrick(
-                        timestamp=self.renko_state.last_index,
-                        open=self.renko_state.high,
-                        high=self.renko_state.int_high,
-                        low=self.renko_state.int_low,
-                        close=self.renko_state.high + self.brick_size,
-                        direction=Trend.UP,
-                    )
+            # build bullish brick
+            brick_diff = (
+                int((Decimal(row.close) - self.renko_state.high) / self.brick_size)
+                * self.brick_size
+            )
+            new_bricks.append(
+                RenkoBrick(
+                    timestamp=self.renko_state.last_index,
+                    open=self.renko_state.high,
+                    high=self.renko_state.int_high,
+                    low=self.renko_state.int_low,
+                    close=self.renko_state.high + brick_diff,
+                    direction=Trend.UP,
                 )
-                self.renko_state.last_index = row.Index
-                self.renko_state.low = self.renko_state.high
-                self.renko_state.high += self.brick_size
-                self.renko_state.abs_high = max(
-                    self.renko_state.int_high, self.renko_state.abs_high
-                )
+            )
+            self.renko_state.low = self.renko_state.high
+            self.renko_state.high += brick_diff
+            self.renko_state.last_index = row.Index
             self.renko_state.int_high = Decimal(row.close)
             self.renko_state.int_low = Decimal(row.close)
 
         elif row.close <= self.renko_state.low - self.brick_size:
-            # build bearish bricks
-            while row.close <= self.renko_state.low - self.brick_size:
-                new_bricks.append(
-                    RenkoBrick(
-                        timestamp=self.renko_state.last_index,
-                        open=self.renko_state.low,
-                        high=self.renko_state.int_high,
-                        low=self.renko_state.int_low,
-                        close=self.renko_state.low - self.brick_size,
-                        direction=Trend.DOWN,
-                    )
+            # build bearish brick
+            brick_diff = (
+                int((self.renko_state.low - Decimal(row.close)) / self.brick_size)
+                * self.brick_size
+            )
+            new_bricks.append(
+                RenkoBrick(
+                    timestamp=self.renko_state.last_index,
+                    open=self.renko_state.low,
+                    high=self.renko_state.int_high,
+                    low=self.renko_state.int_low,
+                    close=self.renko_state.low - brick_diff,
+                    direction=Trend.DOWN,
                 )
-                self.renko_state.last_index = row.Index
-                self.renko_state.high = self.renko_state.low
-                self.renko_state.low -= self.brick_size
-                self.renko_state.abs_low = min(
-                    self.renko_state.int_low, self.renko_state.abs_low
-                )
+            )
+            self.renko_state.high = self.renko_state.low
+            self.renko_state.low -= brick_diff
+            self.renko_state.last_index = row.Index
             self.renko_state.int_high = Decimal(row.close)
             self.renko_state.int_low = Decimal(row.close)
 
