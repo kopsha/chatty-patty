@@ -1,14 +1,13 @@
 import math
 import os
 from copy import deepcopy
-from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from functools import cached_property
 from pathlib import Path
 
-from alpaca_client import AlpacaClient, OrderSide, OrderStatus, Position
-from broker import TREND_ICON, PositionBroker, RenkoTracker
-from thinker import CandleStick
+from alpaca_client import AlpacaClient, OrderSide, OrderStatus
+from broker import TREND_ICON, PositionBroker, RenkoTracker, Trend
 
 
 class AlpacaScavenger:
@@ -110,7 +109,7 @@ class AlpacaScavenger:
         return lines
 
     async def select_affordable_stocks(self):
-        weeks_ago = datetime.now(timezone.utc) - timedelta(days=7 * 7)
+        weeks_ago = datetime.now(timezone.utc) - timedelta(days=7)
         friday = datetime.now(timezone.utc) - timedelta(days=3)
 
         affordable = list()
@@ -118,18 +117,26 @@ class AlpacaScavenger:
         for symbol in most_active:
             bars = await self.client.fetch_bars(symbol, since=weeks_ago, interval="30T")
             last = bars[-1]
-            if last.high < self.account.cash:
+            if last.high < (self.account.cash * Decimal(".9")):
                 affordable.append((symbol, bars))
 
+        print()
+
+        fresh_ups = list()
         for symbol, bars in affordable:
             # read at least a full day of open market
             minute_bars = await self.client.fetch_bars(symbol, friday, interval="1T")
-            day_trac = RenkoTracker.from_bars(symbol, minute_bars, interval="1m")
-            day_trac.draw_chart(self.CHARTS_PATH)
+            day_trac, last_event, distance = RenkoTracker.from_bars(
+                symbol, minute_bars, interval="1m"
+            )
 
-            # past weeks tracker / might not use it
-            week_trac = RenkoTracker.from_bars(symbol, bars, interval="30m")
-            week_trac.draw_chart(self.CHARTS_PATH)
+            if distance < 3 and day_trac.trend == Trend.UP:
+                fresh_ups.append(day_trac)
+                day_trac.draw_chart(self.CHARTS_PATH)
+
+        print("Betting on:")
+        for trac in fresh_ups:
+            print(f"{trac.symbol}: {trac.trend} x {trac.strength} / {trac.current_price:.2f} $")
 
     @cached_property
     def known_commands(self):

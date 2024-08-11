@@ -42,8 +42,17 @@ class RenkoTracker(OpenPositionTracker):
         entry_time = datetime.fromtimestamp(sticks[0].timestamp)
         instance = cls(symbol, sticks[0].open, entry_time, interval=interval)
         instance.update_brick_size(sticks)
-        instance.feed(sticks)
-        return instance
+
+        # find last trend reversal
+        events = instance.feed(sticks)
+        last_event, distance = events[0], len(events)
+        for i, ev in enumerate(reversed(events)):
+            if ev is not None:
+                last_event = ev
+                distance = i
+                break
+
+        return instance, last_event, distance
 
     def __init__(
         self, symbol: str, entry_price: Decimal, entry_time: datetime, interval="1m"
@@ -70,9 +79,9 @@ class RenkoTracker(OpenPositionTracker):
         self.breakout = 0
 
     def update_brick_size(self, from_sticks: list) -> Decimal:
-        absolute_range = list(x.high - x.low for x in from_sticks)
-        middle = max(median(absolute_range), 0.001)
-        self.brick_size = Decimal(middle).quantize(Decimal(".001"))
+        absolute_range = list(x.high - x.low for x in from_sticks[-9:])
+        half_average = max(mean(absolute_range) / 2, 0.001)
+        self.brick_size = Decimal(half_average).quantize(Decimal(".001"))
         return self.brick_size
 
     def feed(self, sticks: list[CandleStick]) -> list[Trend | None]:
@@ -100,16 +109,16 @@ class RenkoTracker(OpenPositionTracker):
             self.strength += 1
             self.breakout = 0
         else:
-            self.strength -= 1
             self.breakout += 1
 
-        event = None
-        if self.breakout:
-            needed = zone_log(self.strength)
-            if self.breakout > needed:
-                self.trend = REVERSE[self.trend]
-                self.strength = self.breakout
-                event = self.trend
+        allowed = zone_log(self.strength)
+        if self.breakout > allowed:
+            self.trend = REVERSE[self.trend]
+            self.strength = self.breakout
+            self.breakout = 0
+            event = self.trend
+        else:
+            event = None
 
         return event
 
@@ -279,8 +288,8 @@ class RenkoTracker(OpenPositionTracker):
         ax.set_xticks(minor_ticks, minor=True)
         ax.set_ylim(
             [
-                self.renko_state.abs_low - self.brick_size / Decimal("3"),
-                self.renko_state.abs_high + self.brick_size / Decimal("3"),
+                self.renko_state.abs_low - self.brick_size,
+                self.renko_state.abs_high + self.brick_size,
             ]
         )
 
