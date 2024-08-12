@@ -321,6 +321,20 @@ class AlpacaClient:
 
         return quote
 
+    async def fetch_latest_bar(self, symbol: str) -> Bar:
+        api_url = self.API_ROOT.format(group="data", method="v2/stocks/bars/latest")
+        query = dict(
+            feed="iex",
+            symbols=symbol,
+        )
+        response = await self.client.get(api_url, params=query)
+        if vars(response.bars):
+            data = getattr(response.bars, symbol)
+            bar = Bar.from_alpaca(data)
+        else:
+            bar = None
+        return bar
+
     async def fetch_bars(
         self, symbol: str, since: datetime, interval: str = "30T"
     ) -> list[Bar]:

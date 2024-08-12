@@ -7,7 +7,7 @@ from functools import cached_property
 from pathlib import Path
 
 from alpaca_client import AlpacaClient, OrderSide, OrderStatus
-from broker import TREND_ICON, PositionBroker, RenkoTracker, Trend
+from broker import PositionBroker, Trend
 
 
 class AlpacaScavenger:
@@ -24,11 +24,7 @@ class AlpacaScavenger:
 
     async def on_start(self):
         await self.client.on_start()
-
         await self.update_market_clock()
-        self.account = await self.client.fetch_account_info()
-        self.positions = await self.client.fetch_open_positions()
-        self.brokers = await self.make_brokers_for_open_positions()
 
     async def on_stop(self):
         await self.client.on_stop()
@@ -82,17 +78,11 @@ class AlpacaScavenger:
             bars = await self.client.fetch_bars(
                 broker.symbol, broker.current_time, interval="1T"
             )
-
-            events, chart, closed = await broker.feed_and_act(bars)
-            for event in events:
-                print(TREND_ICON[event], end="")
-
-            message = (
-                f"\n! Downtrend breakout triggered exit at {broker.exit_price}"
-                if closed
-                else None
-            )
+            chart, events = await broker.feed_and_act(bars)
             if chart:
+                message = "\n".join(
+                    (broker.formatted_value(), ",".join(map(str, events)))
+                )
                 traces.append((broker.formatted_value(), chart, message))
 
         return traces
@@ -105,10 +95,13 @@ class AlpacaScavenger:
         lines.extend(str(bi) for bi in self.brokers)
         lines.append("--- Account totals ---")
         lines.append(f"Portfolio value: *{self.account.portfolio_value:9.2f}* $")
-        lines.append(f"Cash:                  *{self.account.cash:9.2f}* $")
+        lines.append(f"Cash:                  *{self.account.buying_power:9.2f}* $")
         return lines
 
     async def select_affordable_stocks(self):
+        if self.account.buying_power < Decimal(".5"):
+            return
+
         weeks_ago = datetime.now(timezone.utc) - timedelta(days=7)
         friday = datetime.now(timezone.utc) - timedelta(days=3)
 
@@ -117,26 +110,44 @@ class AlpacaScavenger:
         for symbol in most_active:
             bars = await self.client.fetch_bars(symbol, since=weeks_ago, interval="30T")
             last = bars[-1]
-            if last.high < (self.account.cash * Decimal(".9")):
+            if last.high < (self.account.buying_power * Decimal(".9")):
                 affordable.append((symbol, bars))
 
-        print()
-
         fresh_ups = list()
+        skip = {"HUGE"}
         for symbol, bars in affordable:
+            if symbol in skip:
+                continue
+
             # read at least a full day of open market
             minute_bars = await self.client.fetch_bars(symbol, friday, interval="1T")
-            day_trac, last_event, distance = RenkoTracker.from_bars(
-                symbol, minute_bars, interval="1m"
+            broker, last_event, distance = PositionBroker.from_bars(
+                self.client, symbol, minute_bars
             )
+            if distance < 3 and last_event == Trend.UP:
+                fresh_ups.append(broker)
+                broker.trac.draw_chart(self.CHARTS_PATH)
 
-            if distance < 3 and day_trac.trend == Trend.UP:
-                fresh_ups.append(day_trac)
-                day_trac.draw_chart(self.CHARTS_PATH)
+        print()
+        for broker in fresh_ups:
+            price = broker.trac.current_price.quantize(Decimal(".001"))
+            qty = int(self.account.buying_power / price)
+            if qty > 0:
+                await broker.buy(qty, price)
+                self.account.buying_power -= broker.market_value
+                self.account.buying_power = self.account.buying_power.quantize(
+                    Decimal(".001")
+                )
+                self.brokers.append(broker)
+                print(
+                    f"Ordered {qty} x {broker.symbol} @ {price:.3f} $ //"
+                    f" {broker.trac.trend} x {broker.trac.strength} ({self.account.buying_power})"
+                )
 
-        print("Betting on:")
-        for trac in fresh_ups:
-            print(f"{trac.symbol}: {trac.trend} x {trac.strength} / {trac.current_price:.2f} $")
+    async def refresh_positions(self):
+        self.account = await self.client.fetch_account_info()
+        self.positions = await self.client.fetch_open_positions()
+        self.brokers = await self.make_brokers_for_open_positions()
 
     @cached_property
     def known_commands(self):

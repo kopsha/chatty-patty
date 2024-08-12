@@ -7,9 +7,9 @@ from datetime import datetime
 from decimal import Decimal
 from functools import cached_property
 from pathlib import Path
-from statistics import harmonic_mean, mean, median
+from statistics import mean
 from types import SimpleNamespace
-from typing import Type
+from typing import Self, Type
 
 import pandas as pd
 import pytz
@@ -37,10 +37,10 @@ class RenkoTracker(OpenPositionTracker):
     PRECISION = 3
 
     @classmethod
-    def from_bars(cls: Type, symbol: str, bars: list, interval: str):
+    def from_bars(cls: Type, symbol: str, bars: list):
         sticks = [CandleStick.from_bar(bi) for bi in bars]
         entry_time = datetime.fromtimestamp(sticks[0].timestamp)
-        instance = cls(symbol, sticks[0].open, entry_time, interval=interval)
+        instance = cls(symbol, sticks[0].open, entry_time)
         instance.update_brick_size(sticks)
 
         # find last trend reversal
@@ -317,20 +317,33 @@ class PositionBroker:
     CACHE = Path(os.getenv("PRIVATE_CACHE", "."))
     CHARTS_PATH = Path(os.getenv("OUTPUTS_PATH", "charts"))
 
-    def __init__(
-        self,
-        client: AlpacaClient,
-        order: Order,
-    ):
+    def __init__(self, client: AlpacaClient, symbol: str):
         self.client = client
-        self.order = order
-        self.symbol = order.symbol
-        self.qty = order.filled_qty
-        self.entry_price = order.filled_avg_price
-        self.exit_price = None
-        self.entry_time = order.submitted_at
-        self.trac = RenkoTracker(self.symbol, self.entry_price, self.entry_time)
-        self.trac.read_from(self.CACHE)
+        self.order = None
+        self.symbol = symbol
+        self.qty: int = 0
+        self.entry_price = Decimal()
+        self.trac = None
+
+    @classmethod
+    def from_bars(cls, client: AlpacaClient, symbol: str, bars: list):
+        instance = cls(client, symbol)
+        instance.symbol = symbol
+        instance.trac, last_event, distance = RenkoTracker.from_bars(symbol, bars)
+        return instance, last_event, distance
+
+    @classmethod
+    def from_order(cls, client: AlpacaClient, order: Order) -> Self:
+        instance = cls(client, order.symbol)
+        instance.order = order
+        instance.symbol = order.symbol
+        instance.qty = order.filled_qty
+        instance.entry_price = order.filled_avg_price
+        instance.trac = RenkoTracker(
+            instance.symbol, instance.entry_price, order.submitted_at
+        )
+        instance.trac.read_from(instance.CACHE)
+        return instance
 
     def __str__(self) -> str:
         return f"*{self.symbol}*: {self.qty} x {self.trac.current_price:.2f} $ = *{self.market_value:.2f}* $"
@@ -353,48 +366,44 @@ class PositionBroker:
     def entry_cost(self) -> Decimal:
         return self.qty * self.entry_price
 
+    @property
+    def stop_loss_limit(self) -> Decimal:
+        return self.entry_price * Decimal(".925")
+
     async def feed_and_act(
         self, bars: list[SimpleNamespace]
     ) -> tuple[list, Path | None, bool]:
+        """Exit positioon for stop-loss or detecting a downtrend"""
+
         events = self.trac.feed(CandleStick.from_bar(bi) for bi in bars)
+        self.trac.write_to(self.CACHE)
 
-        chart_path = None
-        closed = False
-        if events:
-            chart_path = self.trac.draw_chart(self.CHARTS_PATH)
-            self.trac.write_to(self.CACHE)
+        price = self.trac.current_price
+        if price <= self.stop_loss_limit or self.trac.trend == Trend.DOWN:
+            await self.sell(price)
 
-            last_event = None
-            for ev in filter(lambda x: x, events):
-                last_event = ev
+        chart = None
+        if any(events):
+            chart = self.trac.draw_chart(self.CHARTS_PATH)
 
-            if last_event == Trend.DOWN:
-                print()
-                print(
-                    "Downtrend breakout, exiting position at",
-                    self.trac.current_price,
-                    "$",
-                )
-                closed = await self.sell(self.trac.current_price)
-
-        return events, chart_path, closed
+        return chart, events
 
     async def buy(self, qty: int, price: Decimal):
         if self.order:
             await self.client.cancel_order(self.order.id)
+        self.qty = qty
         self.order = await self.client.limit_order(
             OrderSide.BUY, self.symbol, qty, price
         )
+        self.trac.write_to(self.CACHE)
 
     async def sell(self, price: Decimal):
-        print("faking sell", price)
-        self.exit_price = price
-        return True
         if self.order:
             await self.client.cancel_order(self.order.id)
         self.order = await self.client.limit_order(
             OrderSide.SELL, self.symbol, self.qty, price
         )
+        self.trac.write_to(self.CACHE)
 
 
 if __name__ == "__main__":

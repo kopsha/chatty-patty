@@ -71,15 +71,6 @@ class Seeker:
         await self.patty.on_start()
         await self.alpaca.on_start()
 
-        message = "\n".join(
-            (
-                "Telepathy channel is up.",
-                *self.alpaca.overview(),
-            )
-        )
-        # await self.patty.say(message)
-        await self.alpaca.select_affordable_stocks()
-
     async def on_stop(self):
         await self.alpaca.on_stop()
         await self.patty.on_stop()
@@ -87,16 +78,25 @@ class Seeker:
     @error_resilient
     async def fast_task(self):
         print(".", end="", flush=True)
+
+        await self.alpaca.refresh_positions()
+        print(".", end="", flush=True)
+
+        # this will monitor and sell
         traces = await self.alpaca.track_and_trace()
         for caption, chart, close_message in traces:
-            print(caption, chart, close_message)
             await self.patty.selfie(chart, caption=caption)
             if close_message:
                 await self.patty.say(close_message)
+        print(".", end="", flush=True)
+
+        # this will attempt to buy
+        await self.alpaca.select_affordable_stocks()
+        print(".", end="", flush=True)
 
     @error_resilient
     async def background_task(self):
-        data = await self.patty.get_updates(timeout=3)
+        data = await self.patty.get_updates(timeout=21)
         commands, system_commands, errors = self.patty.digest_updates(data)
 
         if errors:
