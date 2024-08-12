@@ -374,6 +374,8 @@ class PositionBroker:
         self, bars: list[SimpleNamespace]
     ) -> tuple[list, Path | None, bool]:
         """Exit positioon for stop-loss or detecting a downtrend"""
+        if not self.trac.data:
+            self.trac, _, _ = RenkoTracker.from_bars(self.symbol, bars)
 
         events = self.trac.feed(CandleStick.from_bar(bi) for bi in bars)
         self.trac.write_to(self.CACHE)
@@ -389,8 +391,6 @@ class PositionBroker:
         return chart, events
 
     async def buy(self, qty: int, price: Decimal):
-        if self.order:
-            await self.client.cancel_order(self.order.id)
         self.qty = qty
         self.order = await self.client.limit_order(
             OrderSide.BUY, self.symbol, qty, price
@@ -398,8 +398,6 @@ class PositionBroker:
         self.trac.write_to(self.CACHE)
 
     async def sell(self, price: Decimal):
-        if self.order:
-            await self.client.cancel_order(self.order.id)
         self.order = await self.client.limit_order(
             OrderSide.SELL, self.symbol, self.qty, price
         )

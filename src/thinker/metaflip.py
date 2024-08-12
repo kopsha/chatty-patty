@@ -32,6 +32,8 @@ class ThinkEncoder(json.JSONEncoder):
     def object_hook(obj):
         if iso_tm := obj.get("iso_datetime"):
             return datetime.fromisoformat(iso_tm)
+        elif isinstance(obj, float):
+            return Decimal(obj)
         elif classname := obj.pop("_cls_name", None):
             cls = getattr(sys.modules[__name__], classname)
             return cls(**obj)
