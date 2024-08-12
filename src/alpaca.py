@@ -68,7 +68,9 @@ class AlpacaScavenger:
                 entry_orders.append(order)
                 qty -= order.qty
 
-        brokers = [PositionBroker(self.client, order=o) for o in entry_orders]
+        brokers = [
+            PositionBroker.from_order(self.client, order=o) for o in entry_orders
+        ]
         return brokers
 
     async def track_and_trace(self):
