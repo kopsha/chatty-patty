@@ -32,11 +32,14 @@ class ThinkEncoder(json.JSONEncoder):
     def object_hook(obj):
         if iso_tm := obj.get("iso_datetime"):
             return datetime.fromisoformat(iso_tm)
-        elif isinstance(obj, float):
-            return Decimal(obj)
         elif classname := obj.pop("_cls_name", None):
             cls = getattr(sys.modules[__name__], classname)
+            for k, v in obj.items():
+                if isinstance(v, float):
+                    obj[k] = Decimal(v)
             return cls(**obj)
+        if "brick_size" in obj:
+            obj["brick_size"] = Decimal(obj["brick_size"])
         return obj
 
 

@@ -1,15 +1,16 @@
 import json
 import math
 import os
-from abc import ABC, abstractmethod
+import sys
 from collections import deque
+from dataclasses import asdict, dataclass, fields, is_dataclass
 from datetime import datetime
 from decimal import Decimal
 from functools import cached_property
 from pathlib import Path
 from statistics import mean
+from typing import ClassVar, Self, Type
 from types import SimpleNamespace
-from typing import Self, Type
 
 import pandas as pd
 import pytz
@@ -17,22 +18,83 @@ from alpaca_client import AlpacaClient, Order, OrderSide
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch, Rectangle
-from thinker import CandleStick, RenkoBrick, RenkoState, ThinkEncoder, Trend
+from thinker import RenkoBrick, Trend
 
 REVERSE = {Trend.UP: Trend.DOWN, Trend.DOWN: Trend.UP}
 TREND_ICON = {Trend.UP: "↑", Trend.DOWN: "↓", None: "_"}
 
 
-class OpenPositionTracker(ABC):
-    """Follows with minute candlesticks an open position, until exit sale"""
 
-    @abstractmethod
-    def feed(self, sticks: list[CandleStick]) -> list[Trend | None]:
-        """Given a list of candlestick, applies the strategy and return events"""
-        pass
+class ThoughtEncoder(json.JSONEncoder):
+    def default(self, o):
+        if is_dataclass(o):
+            data_obj = asdict(o)
+            data_obj["class_type"] = type(o).__name__
+            return data_obj
+        elif isinstance(o, Decimal):
+            return float(o)
+        elif isinstance(o, datetime):
+            return dict(iso_datetime=o.isoformat())
+        return super().default(o)
+
+    @staticmethod
+    def object_hook(obj):
+        if iso_tm := obj.get("iso_datetime"):
+            return datetime.fromisoformat(iso_tm)
+        elif classname := obj.pop("class_type", None):
+            cls = getattr(sys.modules[__name__], classname)
+            for k, v in obj.items():
+                if isinstance(v, float):
+                    obj[k] = Decimal(v)
+            return cls(**obj)
+        if "brick_size" in obj:
+            obj["brick_size"] = Decimal(obj["brick_size"])
+        return obj
 
 
-class RenkoTracker(OpenPositionTracker):
+@dataclass
+class CandleStick:
+    AS_DTYPE: ClassVar[dict[str, str]] = dict(
+        open="float",
+        high="float",
+        low="float",
+        close="float",
+        volume="float",
+        trades="int",
+        vw_price="float",
+    )
+
+    timestamp: int
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    volume: Decimal = Decimal()
+    trades: int = 0
+    vw_price: Decimal = Decimal()
+
+    @classmethod
+    def from_dict(cls: Type, obj: SimpleNamespace):
+        valid_fields = {f.name: f.type for f in fields(cls)}
+        valid_data = dict()
+        for key, value in vars(obj).items():
+            if value and key in valid_fields:
+                typed = valid_fields[key]
+                valid_data[key] = typed(value)
+        return cls(**valid_data)
+
+@dataclass
+class RenkoState:
+    high: Decimal
+    low: Decimal
+    abs_high: Decimal
+    abs_low: Decimal
+    last_index: datetime
+    int_high: Decimal
+    int_low: Decimal
+
+
+class OpenTrader:
     MAXLEN = 15 * 30  # Minutes of typical market day
     PRECISION = 3
 
@@ -59,7 +121,6 @@ class RenkoTracker(OpenPositionTracker):
     ):
         self.symbol = symbol
         self.interval = interval
-        self.entry_price = entry_price
         self.current_price = entry_price
         self.data: deque[CandleStick] = deque(maxlen=self.MAXLEN)
         self.current_time = entry_time
@@ -177,8 +238,8 @@ class RenkoTracker(OpenPositionTracker):
 
         elif row.close <= self.renko_state.low - self.brick_size:
             # build bearish brick
-            brick_diff = (
-                int((self.renko_state.low - Decimal(row.close)) / self.brick_size)
+            brick_diff = Decimal(
+                int((float(self.renko_state.low) - row.close) / float(self.brick_size))
                 * self.brick_size
             )
             new_bricks.append(
@@ -391,6 +452,7 @@ class PositionBroker:
         return chart, events
 
     async def buy(self, qty: int, price: Decimal):
+        price = Decimal(price).quantize(Decimal(".001"))
         self.qty = qty
         self.order = await self.client.limit_order(
             OrderSide.BUY, self.symbol, qty, price
@@ -398,6 +460,7 @@ class PositionBroker:
         self.trac.write_to(self.CACHE)
 
     async def sell(self, price: Decimal):
+        price = Decimal(price).quantize(Decimal(".001"))
         self.order = await self.client.limit_order(
             OrderSide.SELL, self.symbol, self.qty, price
         )

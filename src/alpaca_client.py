@@ -230,6 +230,7 @@ class AlpacaClient:
             position_intent=intentions[side],
         )
         response = await self.client.post(api_url, data=payload)
+        print(response)
         return Order.from_alpaca(response)
 
     async def cancel_order(self, by_id: UUID):

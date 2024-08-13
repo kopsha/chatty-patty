@@ -8,6 +8,8 @@ from pathlib import Path
 
 from alpaca_client import AlpacaClient, OrderSide, OrderStatus
 from broker import PositionBroker, Trend
+from thinker import CandleStick
+from open_trader import OpenTrader
 
 
 class AlpacaScavenger:
@@ -25,6 +27,18 @@ class AlpacaScavenger:
     async def on_start(self):
         await self.client.on_start()
         await self.update_market_clock()
+
+        since = datetime.now(timezone.utc) - timedelta(days=1)
+        bars = await self.client.fetch_bars("DPRO", since, interval="1T")
+
+        sticks = [CandleStick.from_bar(b) for b in bars]
+        tt = OpenTrader(symbol="DPROo")
+        tt.feed(sticks)
+        tt.write_to(self.CACHE)
+        tt.draw_chart(self.CHARTS_PATH)
+
+        raise RuntimeError("Stop")
+        
 
     async def on_stop(self):
         await self.client.on_stop()
@@ -82,7 +96,7 @@ class AlpacaScavenger:
             )
             chart, events = await broker.feed_and_act(bars)
             if chart:
-                message = "\n".join(
+                message = " // ".join(
                     (broker.formatted_value(), ",".join(map(str, events)))
                 )
                 traces.append((broker.formatted_value(), chart, message))
