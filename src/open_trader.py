@@ -333,8 +333,6 @@ def test_main():
     one = OpenTrader(symbol="DPROo")
 
     one.read_from(CACHE)
-    one.draw_chart(Path("."))
-
     print(one)
 
 
