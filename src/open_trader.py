@@ -22,18 +22,21 @@ class MarketSignal(IntEnum):
     SELL = auto()
 
 
-class Trend(IntEnum):
+class MarketTrend(IntEnum):
     UP = auto()
     DOWN = auto()
 
+    def as_signal(self) -> MarketSignal:
+        return MarketSignal.BUY if self == self.UP else MarketSignal.SELL
 
-REVERSE = {Trend.UP: Trend.DOWN, Trend.DOWN: Trend.UP}
-TREND_ICON = {Trend.UP: "↑", Trend.DOWN: "↓", None: "_"}
+
+REVERSE = {MarketTrend.UP: MarketTrend.DOWN, MarketTrend.DOWN: MarketTrend.UP}
+TREND_ICON = {MarketTrend.UP: "↑", MarketTrend.DOWN: "↓", None: "_"}
 MAXLEN: int = 15 * 30  # Minutes of typical market day times 15
 PRECISION: Decimal = Decimal(".0001")
 
 
-class EncodableModel(BaseModel):
+class Serializable(BaseModel):
     class Config:
         json_encoders = {
             Decimal: lambda val: val.quantize(PRECISION),
@@ -41,7 +44,7 @@ class EncodableModel(BaseModel):
         }
 
 
-class CandleStick(EncodableModel):
+class CandleStick(Serializable):
     AS_DTYPE: ClassVar[dict[str, str]] = dict(
         open="float",
         high="float",
@@ -61,16 +64,16 @@ class CandleStick(EncodableModel):
     trades: int = 0
 
 
-class RenkoBrick(EncodableModel):
+class RenkoBrick(Serializable):
     time: datetime
     open: Decimal
     high: Decimal
     low: Decimal
     close: Decimal
-    direction: Trend
+    direction: MarketTrend
 
 
-class RenkoState(EncodableModel):
+class RenkoState(Serializable):
     last_index: datetime = datetime.now(timezone.utc)
     high: Decimal = Decimal()
     low: Decimal = Decimal()
@@ -80,7 +83,7 @@ class RenkoState(EncodableModel):
     abs_low: Decimal = Decimal()
 
 
-class OpenTrader(EncodableModel):
+class OpenTrader(Serializable):
     """Follows symbol candlesticks and issues market signals"""
 
     symbol: str
@@ -88,7 +91,7 @@ class OpenTrader(EncodableModel):
     brick_size: Decimal = PRECISION
     renko_state: RenkoState = field(default_factory=RenkoState)
     bricks: List[RenkoBrick] = []
-    trend: Optional[Trend] = None
+    trend: Optional[MarketTrend] = None
     strength: int = 0
     breakout: int = 0
     interval: str = "1m"
@@ -117,7 +120,7 @@ class OpenTrader(EncodableModel):
         with open(filepath, "wt") as datafile:
             datafile.write(self.model_dump_json(indent=4))
 
-    def feed(self, sticks: list[CandleStick]) -> list[Trend | None]:
+    def feed(self, sticks: list[CandleStick]) -> list[MarketSignal]:
         if self.data:
             last_time = self.data[-1].timestamp
             new_sticks = [sti for sti in sticks if sti.timestamp > last_time]
@@ -144,15 +147,16 @@ class OpenTrader(EncodableModel):
         if not new_sticks:
             return []
 
-        events = list()
+        signals = list()
         new_bricks = self.renko_feed(new_sticks)
         for brick in new_bricks:
             self.bricks.append(brick)
             event = self.strategy_eval(brick)
-            events.append(event)
-        return events
+            signals.append(event)
 
-    def strategy_eval(self, brick: RenkoBrick) -> Trend | None:
+        return signals
+
+    def strategy_eval(self, brick: RenkoBrick) -> MarketSignal:
         def zone_log(x: int):
             return int(math.log(x - 1, 3)) if x > 1 else 0
 
@@ -170,11 +174,11 @@ class OpenTrader(EncodableModel):
             self.trend = REVERSE[self.trend]
             self.strength = self.breakout
             self.breakout = 0
-            event = self.trend
+            signal = self.trend.as_signal()
         else:
-            event = None
+            signal = MarketSignal.HOLD
 
-        return event
+        return signal
 
     def renko_feed(self, new_data: list[CandleStick]) -> list[RenkoBrick]:
         self.data.extend(new_data)
@@ -217,7 +221,7 @@ class OpenTrader(EncodableModel):
                     high=self.renko_state.int_high,
                     low=self.renko_state.int_low,
                     close=self.renko_state.high + brick_diff,
-                    direction=Trend.UP,
+                    direction=MarketTrend.UP,
                 )
             )
             self.renko_state.low = self.renko_state.high
@@ -239,7 +243,7 @@ class OpenTrader(EncodableModel):
                     high=self.renko_state.int_high,
                     low=self.renko_state.int_low,
                     close=self.renko_state.low - brick_diff,
-                    direction=Trend.DOWN,
+                    direction=MarketTrend.DOWN,
                 )
             )
             self.renko_state.high = self.renko_state.low
@@ -268,7 +272,7 @@ class OpenTrader(EncodableModel):
             )
             ax.add_line(line)
 
-            if brick.direction == Trend.UP:
+            if brick.direction == MarketTrend.UP:
                 rect = Rectangle(
                     (i, brick.open),
                     1,
@@ -313,8 +317,8 @@ class OpenTrader(EncodableModel):
         )
 
         # Add the legend
-        up_patch = Patch(color="forestgreen", label=f"Size {self.brick_size:.2f} $")
-        down_patch = Patch(color="tomato", label=f"Size {self.brick_size:.2f} $")
+        up_patch = Patch(color="forestgreen", label=f"Size {self.brick_size} $")
+        down_patch = Patch(color="tomato", label=f"Size {self.brick_size} $")
         ax.legend(handles=[up_patch, down_patch], loc="lower left")
         ax.grid()
 
@@ -333,7 +337,6 @@ def test_main():
     one = OpenTrader(symbol="DPROo")
 
     one.read_from(CACHE)
-    print(one)
 
 
 if __name__ == "__main__":

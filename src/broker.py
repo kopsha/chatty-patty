@@ -24,7 +24,6 @@ REVERSE = {Trend.UP: Trend.DOWN, Trend.DOWN: Trend.UP}
 TREND_ICON = {Trend.UP: "↑", Trend.DOWN: "↓", None: "_"}
 
 
-
 class ThoughtEncoder(json.JSONEncoder):
     def default(self, o):
         if is_dataclass(o):
@@ -82,6 +81,7 @@ class CandleStick:
                 typed = valid_fields[key]
                 valid_data[key] = typed(value)
         return cls(**valid_data)
+
 
 @dataclass
 class RenkoState:

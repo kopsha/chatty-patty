@@ -33,12 +33,16 @@ class AlpacaScavenger:
 
         sticks = [CandleStick.from_bar(b) for b in bars]
         tt = OpenTrader(symbol="DPROo")
-        tt.feed(sticks)
-        tt.write_to(self.CACHE)
+        tt.read_from(self.CACHE)
+        signals = tt.feed(sticks)
+
+        # tt.write_to(self.CACHE)
         tt.draw_chart(self.CHARTS_PATH)
+        print(signals)
+        for sig in signals:
+            print(sig)
 
         raise RuntimeError("Stop")
-        
 
     async def on_stop(self):
         await self.client.on_stop()
