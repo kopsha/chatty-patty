@@ -7,9 +7,8 @@ from enum import IntEnum, auto
 from functools import cached_property
 from pathlib import Path
 from statistics import mean
-from typing import ClassVar, Deque, List, Optional, Iterable
+from typing import ClassVar, Deque, Iterable, List, Optional
 
-import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch, Rectangle
@@ -52,7 +51,6 @@ class CandleStick(Serializable):
         close="float",
         volume="float",
         trades="int",
-        vw_price="float",
     )
 
     timestamp: int
@@ -62,6 +60,10 @@ class CandleStick(Serializable):
     close: Decimal
     volume: Decimal = Decimal()
     trades: int = 0
+
+    @property
+    def time(self) -> datetime:
+        return datetime.fromtimestamp(self.timestamp, timezone.utc)
 
 
 class RenkoBrick(Serializable):
@@ -105,7 +107,6 @@ class OpenTrader(Serializable):
         if not filepath.exists():
             return
 
-        print(filepath)
         with open(filepath, "rt") as datafile:
             json_data = datafile.read()
             new = OpenTrader.model_validate_json(json_data)
@@ -147,14 +148,23 @@ class OpenTrader(Serializable):
         if not new_sticks:
             return []
 
+        self.data.extend(new_sticks)
+
         signals = list()
-        new_bricks = self.renko_feed(new_sticks)
+        new_bricks = self.make_renko_bricks(new_sticks)
         for brick in new_bricks:
             self.bricks.append(brick)
             event = self.strategy_eval(brick)
             signals.append(event)
 
         return signals
+
+    def make_renko_bricks(self, sticks: list[CandleStick]) -> list[RenkoBrick]:
+        bricks = list()
+        for stick in sticks:
+            new_bricks = self.digest_data_point(stick)
+            bricks.extend(new_bricks)
+        return bricks
 
     @staticmethod
     def most_recent(signals: list[MarketSignal]):
@@ -191,22 +201,6 @@ class OpenTrader(Serializable):
 
         return signal
 
-    def renko_feed(self, new_data: list[CandleStick]) -> list[RenkoBrick]:
-        self.data.extend(new_data)
-
-        # prepare data frame for bricks computation
-        df = pd.DataFrame(new_data).astype(CandleStick.AS_DTYPE)
-        df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
-        df.set_index("timestamp", inplace=True)
-
-        # compute bricks from new data
-        bricks = list()
-        for row in df.itertuples():
-            new_bricks = self.digest_data_point(row)
-            bricks.extend(new_bricks)
-
-        return bricks
-
     def digest_data_point(self, row: CandleStick):
         new_bricks = list()
 
@@ -237,7 +231,7 @@ class OpenTrader(Serializable):
             )
             self.renko_state.low = self.renko_state.high
             self.renko_state.high += brick_diff
-            self.renko_state.last_index = row.Index
+            self.renko_state.last_index = row.time
             self.renko_state.int_high = Decimal(row.close)
             self.renko_state.int_low = Decimal(row.close)
 
@@ -259,7 +253,7 @@ class OpenTrader(Serializable):
             )
             self.renko_state.high = self.renko_state.low
             self.renko_state.low -= brick_diff
-            self.renko_state.last_index = row.Index
+            self.renko_state.last_index = row.time
             self.renko_state.int_high = Decimal(row.close)
             self.renko_state.int_low = Decimal(row.close)
 

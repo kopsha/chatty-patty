@@ -1,6 +1,6 @@
 import os
 from dataclasses import fields
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -9,13 +9,11 @@ from open_trader import CandleStick, MarketSignal, MarketTrend, OpenTrader
 
 
 def to_stick(bar: Bar) -> CandleStick:
-    valid_fields = {f.name: f.type for f in fields(CandleStick)}
-    valid_data = dict()
-    for k, v in vars(bar).items():
-        if v and k in valid_fields:
-            typed = valid_fields[k]
-            typed_value = typed(v)
-            valid_data[k] = typed_value
+    valid_data = {
+        key: value
+        for key, value in vars(bar).items()
+        if value and key in CandleStick.model_fields
+    }
     return CandleStick(**valid_data)
 
 
@@ -42,8 +40,11 @@ class PositionBroker:
 
     @property
     def current_time(self) -> datetime:
-        ts = self.trac.data[-1].timestamp
-        moment = datetime.fromtimestamp(ts, timezone.utc)
+        if self.trac.data:
+            ts = self.trac.data[-1].timestamp
+            moment = datetime.fromtimestamp(ts, timezone.utc)
+        else:
+            moment = datetime.now(timezone.utc) - timedelta(days=7 * 3)
         return moment
 
     @property
@@ -60,7 +61,7 @@ class PositionBroker:
     def formatted_entry(self) -> str:
         return f"*{self.symbol}*: {self.qty} x {self.open_price:.2f} $ = *{self.entry_cost:.2f}* $"
 
-    async def closing_args(self) -> dict:
+    def closing_args(self) -> dict:
         return dict(
             side=OrderSide.SELL,
             symbol=self.symbol,
@@ -70,6 +71,8 @@ class PositionBroker:
 
     async def react(self, bars: list[Bar]) -> list[MarketSignal]:
         """Exit positioon for stop-loss or detecting a downtrend"""
+        if not bars:
+            return []
 
         signals = self.trac.feed(to_stick(bi) for bi in bars)
         self.trac.write_to(self.CACHE)

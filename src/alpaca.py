@@ -95,10 +95,11 @@ class AlpacaScavenger:
     async def make_brokers_for_open_positions(self):
         """Lookup orders for every open positions"""
         orders = await self.client.fetch_orders("closed")
+        pending = await self.client.fetch_orders("open")
 
         entry_orders = list()
-        positions = deepcopy(self.positions)
 
+        positions = await self.client.fetch_open_positions()
         for pos in positions:
             qty = pos.qty
             related_orders = filter(
@@ -107,10 +108,18 @@ class AlpacaScavenger:
                 and o.side == OrderSide.BUY,
                 orders,
             )
+            related_pending = filter(
+                lambda o: o.symbol == pos.symbol
+                and o.side == OrderSide.SELL,
+                pending,
+            )
             while qty:
                 order = next(related_orders)
-                entry_orders.append(order)
                 qty -= order.qty
+
+                selling = next(related_pending, None)
+                if not selling:
+                    entry_orders.append(order)
 
         brokers = [PositionBroker.from_order(order=o) for o in entry_orders]
         return brokers
@@ -138,7 +147,6 @@ class AlpacaScavenger:
 
     async def refresh_positions(self):
         self.account = await self.client.fetch_account_info()
-        self.positions = await self.client.fetch_open_positions()
         self.brokers = await self.make_brokers_for_open_positions()
 
     @cached_property
