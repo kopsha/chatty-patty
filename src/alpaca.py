@@ -7,9 +7,8 @@ from functools import cached_property
 from pathlib import Path
 
 from alpaca_client import AlpacaClient, OrderSide, OrderStatus
-from broker import PositionBroker, Trend
-from thinker import CandleStick
-from open_trader import OpenTrader
+from open_trader import MarketSignal, OpenTrader
+from position_broker import PositionBroker
 
 
 class AlpacaScavenger:
@@ -27,85 +26,13 @@ class AlpacaScavenger:
     async def on_start(self):
         await self.client.on_start()
         await self.update_market_clock()
-
-        since = datetime.now(timezone.utc) - timedelta(days=1)
-        bars = await self.client.fetch_bars("DPRO", since, interval="1T")
-
-        sticks = [CandleStick.from_bar(b) for b in bars]
-        tt = OpenTrader(symbol="DPROo")
-        tt.read_from(self.CACHE)
-        signals = tt.feed(sticks)
-
-        # tt.write_to(self.CACHE)
-        tt.draw_chart(self.CHARTS_PATH)
-        print(signals)
-        for sig in signals:
-            print(sig)
-
-        raise RuntimeError("Stop")
+        self.account = await self.client.fetch_account_info()
 
     async def on_stop(self):
         await self.client.on_stop()
 
-    async def refresh_spreads(self):
-        print()
-        for pos in self.positions:
-            if quote := await self.client.fetch_latest_quote(pos.symbol):
-                if quote.ask_size and quote.bid_size:
-                    spread = (quote.ask_price - quote.bid_price) * 100 / quote.ask_price
-                else:
-                    spread = math.inf
-
-                print(f"{pos.symbol}: Spread {spread:.2f} %, {quote}")
-            else:
-                print(f"\t{pos.symbol}: no quote")
-
     async def update_market_clock(self):
         self.market_clock = await self.client.fetch_market_clock()
-
-    async def make_brokers_for_open_positions(self):
-        """
-        just a little back tracking:
-        lookup orders and positions
-        """
-        orders = await self.client.fetch_orders("closed")
-
-        entry_orders = list()
-        positions = deepcopy(self.positions)
-
-        for pos in positions:
-            qty = pos.qty
-            related_orders = filter(
-                lambda o: o.symbol == pos.symbol
-                and o.status == OrderStatus.FILLED
-                and o.side == OrderSide.BUY,
-                orders,
-            )
-            while qty:
-                order = next(related_orders)
-                entry_orders.append(order)
-                qty -= order.qty
-
-        brokers = [
-            PositionBroker.from_order(self.client, order=o) for o in entry_orders
-        ]
-        return brokers
-
-    async def track_and_trace(self):
-        traces = list()
-
-        for broker in self.brokers:
-            bars = await self.client.fetch_bars(
-                broker.symbol, broker.current_time, interval="1T"
-            )
-            chart, events = await broker.feed_and_act(bars)
-            if chart:
-                message = " // ".join(
-                    (broker.formatted_value(), ",".join(map(str, events)))
-                )
-                traces.append((broker.formatted_value(), chart, message))
-
-        return traces
 
     def overview(self) -> list[str]:
         lines = list()
@@ -128,41 +55,86 @@ class AlpacaScavenger:
         affordable = list()
         most_active = await self.client.fetch_most_active()
         for symbol in most_active:
-            bars = await self.client.fetch_bars(symbol, since=weeks_ago, interval="30T")
+            bars = await self.client.fetch_bars(symbol, since=weeks_ago, interval="1D")
             last = bars[-1]
             if last.high < (self.account.buying_power * Decimal(".9")):
                 affordable.append((symbol, bars))
 
         fresh_ups = list()
-        skip = {"HUGE"}
         for symbol, bars in affordable:
-            if symbol in skip:
-                continue
+            strategist = OpenTrader(symbol)
+            strategist.read_from(self.CACHE)
 
-            # read at least a full day of open market
-            minute_bars = await self.client.fetch_bars(symbol, friday, interval="1T")
-            broker, last_event, distance = PositionBroker.from_bars(
-                self.client, symbol, minute_bars
-            )
-            if distance < 3 and last_event == Trend.UP:
-                fresh_ups.append(broker)
-                broker.trac.draw_chart(self.CHARTS_PATH)
+            signals = strategist.feed(bars)
+            last, distance = OpenTrader.most_recent(signals)
+
+            if distance < 3 and signal == MarketSignal.BUY:
+                fresh_ups.append((symbol, bars))
 
         print()
-        for broker in fresh_ups:
-            price = broker.trac.current_price.quantize(Decimal(".001"))
+        for symbol, bars in fresh_ups:
+            price = bars[-1].price.quantize(Decimal(".001"))
             qty = int(self.account.buying_power / price)
             if qty > 0:
-                await broker.buy(qty, price)
-                self.account.buying_power -= broker.market_value
-                self.account.buying_power = self.account.buying_power.quantize(
-                    Decimal(".001")
-                )
+                # enter position
+                order = await self.client.limit_order(OrderSide.BUY, symbol, qty, price)
+
+                # make broker for it
+                broker = PositionBroker.from_order(order)
+                await broker.react(bars)
                 self.brokers.append(broker)
+
+                # update account
+                self.account.buying_power -= broker.market_value
+
                 print(
                     f"Ordered {qty} x {broker.symbol} @ {price:.3f} $ //"
                     f" {broker.trac.trend} x {broker.trac.strength} ({self.account.buying_power})"
                 )
+
+    async def make_brokers_for_open_positions(self):
+        """Lookup orders for every open positions"""
+        orders = await self.client.fetch_orders("closed")
+
+        entry_orders = list()
+        positions = deepcopy(self.positions)
+
+        for pos in positions:
+            qty = pos.qty
+            related_orders = filter(
+                lambda o: o.symbol == pos.symbol
+                and o.status == OrderStatus.FILLED
+                and o.side == OrderSide.BUY,
+                orders,
+            )
+            while qty:
+                order = next(related_orders)
+                entry_orders.append(order)
+                qty -= order.qty
+
+        brokers = [PositionBroker.from_order(order=o) for o in entry_orders]
+        return brokers
+
+    async def track_and_trace(self):
+        traces = list()
+
+        for broker in self.brokers:
+            bars = await self.client.fetch_bars(
+                broker.symbol, broker.current_time, interval="1D"
+            )
+            signals = await broker.react(bars)
+
+            last, _ = OpenTrader.most_recent(signals)
+            if last == MarketSignal.SELL:
+                await self.client.limit_order(**broker.closing_args())
+
+                chart = broker.trac.draw_chart(self.CHARTS_PATH)
+                message = " // ".join(
+                    (broker.formatted_value(), ",".join(map(str, signals)))
+                )
+                traces.append((broker.formatted_value(), chart, message))
+
+        return traces
 
     async def refresh_positions(self):
         self.account = await self.client.fetch_account_info()

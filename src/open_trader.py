@@ -7,7 +7,7 @@ from enum import IntEnum, auto
 from functools import cached_property
 from pathlib import Path
 from statistics import mean
-from typing import ClassVar, Deque, List, Optional
+from typing import ClassVar, Deque, List, Optional, Iterable
 
 import pandas as pd
 from matplotlib import pyplot as plt
@@ -120,7 +120,7 @@ class OpenTrader(Serializable):
         with open(filepath, "wt") as datafile:
             datafile.write(self.model_dump_json(indent=4))
 
-    def feed(self, sticks: list[CandleStick]) -> list[MarketSignal]:
+    def feed(self, sticks: Iterable[CandleStick]) -> list[MarketSignal]:
         if self.data:
             last_time = self.data[-1].timestamp
             new_sticks = [sti for sti in sticks if sti.timestamp > last_time]
@@ -155,6 +155,17 @@ class OpenTrader(Serializable):
             signals.append(event)
 
         return signals
+
+    @staticmethod
+    def most_recent(signals: list[MarketSignal]):
+        last_signal = MarketSignal.HOLD
+        distance = 0
+        for i, signal in enumerate(reversed(signals)):
+            if signal != MarketSignal.HOLD:
+                last_signal = signal
+                distance = i
+                break
+        return last_signal, distance
 
     def strategy_eval(self, brick: RenkoBrick) -> MarketSignal:
         def zone_log(x: int):

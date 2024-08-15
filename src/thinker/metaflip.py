@@ -64,17 +64,6 @@ class CandleStick:
     trades: int = 0
     vw_price: Decimal = Decimal()
 
-    @classmethod
-    def from_bar(cls: Type, data: SimpleNamespace):
-        valid_fields = {f.name: f.type for f in fields(cls)}
-        valid_data = dict()
-        for k, v in vars(data).items():
-            if v and k in valid_fields:
-                typed = valid_fields[k]
-                typed_value = typed(v)
-                valid_data[k] = typed_value
-        return cls(**valid_data)
-
 
 class Trend(StrEnum):
     UP = auto()
