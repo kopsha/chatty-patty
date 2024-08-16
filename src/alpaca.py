@@ -44,7 +44,7 @@ class AlpacaScavenger:
         lines.append("--- Account totals ---")
         lines.append(f"Portfolio value: *{self.account.portfolio_value:9.2f}* $")
         lines.append(f"Cash:                  *{self.account.buying_power:9.2f}* $")
-        lines.append(f"Day trade count: *{self.account.daytrade_count:9}*")
+        lines.append(f"Day-trade count: *{self.account.daytrade_count:9}*")
         return lines
 
     async def select_affordable_stocks(self):
