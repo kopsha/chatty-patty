@@ -37,7 +37,7 @@ class PositionBroker:
 
     @property
     def current_price(self) -> Decimal:
-        return self.trac.data[-1].close
+        return self.trac.data[-1].close if self.trac.data else Decimal()
 
     @property
     def current_time(self) -> datetime:

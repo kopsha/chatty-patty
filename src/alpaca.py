@@ -132,13 +132,18 @@ class AlpacaScavenger:
             bars = await self.client.fetch_bars(
                 broker.symbol, broker.current_time, interval="1T"
             )
+
             signals, reason = await broker.react(bars)
             last, _ = OpenTrader.most_recent(signals)
+
             if last == MarketSignal.SELL:
                 await self.client.limit_order(**broker.closing_args())
+
+            if signals:
                 chart = broker.trac.draw_chart(self.CHARTS_PATH)
-                message = "_Signals_: {}, _Reason_: {}".format(
-                    ",".join(map(str.format, signals)),
+                message = "_Trend_:{}, _Signals_: {}, _Reason_: {}".format(
+                    f"{broker.trac.trend} x {broker.trac.strength} ({broker.trac.breakout})",
+                    ",".join(map(str.format, signals)) or "-empty-",
                     reason,
                 )
                 traces.append((broker.formatted_value(), chart, message))

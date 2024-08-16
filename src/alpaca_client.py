@@ -21,17 +21,8 @@ class Account:
 
     @classmethod
     def from_alpaca(cls: Self, response: SimpleNamespace) -> Self:
-        converted_data = dict()
-        decimal_fields = {"equity", "buying_power", "cash", "portfolio_value"}
-        string_fields = {"currency", "account_number"}
-
-        for key, value in response.__dict__.items():
-            if key in decimal_fields:
-                converted_data[key] = Decimal(value)
-            elif key in string_fields:
-                converted_data[key] = value
-
-        return cls(**converted_data)
+        data = {fi.name: fi.type(getattr(response, fi.name)) for fi in fields(cls)}
+        return cls(**data)
 
 
 @dataclass
