@@ -17,6 +17,7 @@ class Account:
     portfolio_value: Decimal
     currency: str
     account_number: str
+    daytrade_count: int
 
     @classmethod
     def from_alpaca(cls: Self, response: SimpleNamespace) -> Self:
