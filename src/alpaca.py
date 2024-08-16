@@ -131,7 +131,7 @@ class AlpacaScavenger:
             bars = await self.client.fetch_bars(
                 broker.symbol, broker.current_time, interval="1T"
             )
-            signals, reason = await broker.react(bars) or "-empty-"
+            signals, reason = await broker.react(bars)
             last, _ = OpenTrader.most_recent(signals)
             if last == MarketSignal.SELL:
                 await self.client.limit_order(**broker.closing_args())
