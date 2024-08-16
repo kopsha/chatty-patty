@@ -27,6 +27,7 @@ class AlpacaScavenger:
         await self.client.on_start()
         await self.update_market_clock()
         self.account = await self.client.fetch_account_info()
+        await self.refresh_positions()
 
     async def on_stop(self):
         await self.client.on_stop()
@@ -39,7 +40,7 @@ class AlpacaScavenger:
         market_status = "Open" if self.market_clock.is_open else "Closed"
         lines.append(f"Market is {market_status}.")
         lines.append("--- Open positions ---")
-        lines.extend(str(bi) for bi in self.brokers)
+        lines.extend(bi.formatted_value() for bi in self.brokers)
         lines.append("--- Account totals ---")
         lines.append(f"Portfolio value: *{self.account.portfolio_value:9.2f}* $")
         lines.append(f"Cash:                  *{self.account.buying_power:9.2f}* $")
@@ -133,7 +134,7 @@ class AlpacaScavenger:
             signals, reason = await broker.react(bars) or "-empty-"
             last, _ = OpenTrader.most_recent(signals)
             if last == MarketSignal.SELL:
-                # await self.client.limit_order(**broker.closing_args())
+                await self.client.limit_order(**broker.closing_args())
                 chart = broker.trac.draw_chart(self.CHARTS_PATH)
                 message = "_Signals_: {}, _Reason_: {}".format(
                     ",".join(map(str.format, signals)),

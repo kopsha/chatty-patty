@@ -17,16 +17,15 @@ rsync -az \
     --exclude "data/" \
     --exclude "out/" \
     $PROJECT_ROOT/ fibonet:/home/$PROJECT_NAME/
-ssh fibonet chown -R area51:area51 /home/$PROJECT_NAME
 
 ## service recomposition
 printf " --\n"
 printf " -- rebuilding services\n"
 printf " --\n"
 ssh fibonet /bin/bash <<'EOT'
+chown -R area51:area51 /home/$PROJECT_NAME
 set -euo pipefail
 cd /home/chatty-patty
-chown caddy:caddy /var/www/socks
 docker-compose build
 docker-compose down --remove-orphans
 docker-compose up --detach --remove-orphans

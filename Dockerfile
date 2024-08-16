@@ -1,7 +1,7 @@
 FROM python:3-slim
 
 RUN <<EOF
-adduser --disabled-password --gecos "" --home=/app patty
+adduser --disabled-password --gecos "" --home=/app --uid=1051 patty
 apt update && apt install --yes --no-install-recommends entr
 rm -rf /var/lib/apt/lists/*
 mkdir -p /app/src /app/data /app/out
