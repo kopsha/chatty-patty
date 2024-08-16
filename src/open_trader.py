@@ -3,7 +3,7 @@ from collections import deque
 from dataclasses import field
 from datetime import datetime, timezone
 from decimal import Decimal
-from enum import IntEnum, auto
+from enum import StrEnum, auto
 from functools import cached_property
 from pathlib import Path
 from statistics import mean
@@ -15,13 +15,13 @@ from matplotlib.patches import Patch, Rectangle
 from pydantic import BaseModel
 
 
-class MarketSignal(IntEnum):
+class MarketSignal(StrEnum):
     HOLD = auto()
     BUY = auto()
     SELL = auto()
 
 
-class MarketTrend(IntEnum):
+class MarketTrend(StrEnum):
     UP = auto()
     DOWN = auto()
 

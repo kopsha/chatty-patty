@@ -74,7 +74,6 @@ class Seeker:
         intro = self.alpaca.overview()
         await self.patty.say("\n".join(intro))
 
-
     async def on_stop(self):
         await self.alpaca.on_stop()
         await self.patty.on_stop()

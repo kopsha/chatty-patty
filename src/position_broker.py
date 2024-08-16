@@ -5,7 +5,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from alpaca_client import Bar, Order, OrderSide
-from open_trader import CandleStick, MarketSignal, MarketTrend, OpenTrader
+from open_trader import CandleStick, MarketSignal, MarketTrend, OpenTrader, PRECISION
 
 
 def to_stick(bar: Bar) -> CandleStick:
@@ -31,9 +31,8 @@ class PositionBroker:
         self.symbol = symbol
         self.qty = qty
         self.open_price = price
-        self.open_price = Decimal("18.43")
-        self.stop_loss_limit =  price * Decimal(".925")
-        self.stop_loss_limit =  Decimal("17.025")
+        self.stop_loss_limit = price * Decimal(".925")
+        self.stop_loss_limit = Decimal("0.125")  # HACK: temporary override
         self.trac = OpenTrader(symbol=symbol)
 
     @property
@@ -46,7 +45,7 @@ class PositionBroker:
             ts = self.trac.data[-1].timestamp
             moment = datetime.fromtimestamp(ts, timezone.utc)
         else:
-            moment = datetime.now(timezone.utc) - timedelta(days=7 * 3)
+            moment = datetime.now(timezone.utc) - timedelta(days=7 * 4)
         return moment
 
     @property
@@ -58,7 +57,7 @@ class PositionBroker:
         return self.qty * self.open_price
 
     def formatted_value(self) -> str:
-        return f"*{self.symbol}: {self.qty} x {self.current_price:.2f} $ = *{self.market_value:.2f}* $"
+        return f"*{self.symbol}*: {self.qty} x {self.current_price:.2f} $ = *{self.market_value:.2f}* $"
 
     def formatted_entry(self) -> str:
         return f"*{self.symbol}*: {self.qty} x {self.open_price:.2f} $ = *{self.entry_cost:.2f}* $"
@@ -71,20 +70,21 @@ class PositionBroker:
             price=self.current_price,
         )
 
-    async def react(self, bars: list[Bar]) -> list[MarketSignal]:
+    async def react(self, bars: list[Bar]) -> tuple[list[MarketSignal], str]:
         """Exit positioon for stop-loss or detecting a downtrend"""
         if not bars:
-            return []
+            return ([], "")
 
         signals = self.trac.feed(to_stick(bi) for bi in bars)
         self.trac.write_to(self.CACHE)
 
-        price = Decimal(bars[-1].close)
-        if price <= self.stop_loss_limit or self.trac.trend == MarketTrend.DOWN:
-            # Kind of an emergency exit
-            return [MarketSignal.SELL]
+        price = Decimal(bars[-1].close).quantize(PRECISION)
+        if price <= self.stop_loss_limit:
+            return [MarketSignal.SELL], "stop loss"
+        elif self.trac.trend == MarketTrend.DOWN:
+            return [MarketSignal.SELL], "ongoing downtrend"
 
-        return signals
+        return signals, ""
 
 
 if __name__ == "__main__":

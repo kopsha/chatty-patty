@@ -109,8 +109,7 @@ class AlpacaScavenger:
                 orders,
             )
             related_pending = filter(
-                lambda o: o.symbol == pos.symbol
-                and o.side == OrderSide.SELL,
+                lambda o: o.symbol == pos.symbol and o.side == OrderSide.SELL,
                 pending,
             )
             while qty:
@@ -129,17 +128,16 @@ class AlpacaScavenger:
 
         for broker in self.brokers:
             bars = await self.client.fetch_bars(
-                broker.symbol, broker.current_time, interval="1D"
+                broker.symbol, broker.current_time, interval="1T"
             )
-            signals = await broker.react(bars)
-
+            signals, reason = await broker.react(bars) or "-empty-"
             last, _ = OpenTrader.most_recent(signals)
             if last == MarketSignal.SELL:
-                await self.client.limit_order(**broker.closing_args())
-
+                # await self.client.limit_order(**broker.closing_args())
                 chart = broker.trac.draw_chart(self.CHARTS_PATH)
-                message = " // ".join(
-                    (broker.formatted_value(), ",".join(map(str, signals)))
+                message = "_Signals_: {}, _Reason_: {}".format(
+                    ",".join(map(str.format, signals)),
+                    reason,
                 )
                 traces.append((broker.formatted_value(), chart, message))
 
