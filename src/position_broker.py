@@ -31,7 +31,9 @@ class PositionBroker:
         self.symbol = symbol
         self.qty = qty
         self.open_price = price
-        self.stop_loss_limit = price * Decimal(".925")
+        self.open_price = Decimal("18.43")
+        self.stop_loss_limit =  price * Decimal(".925")
+        self.stop_loss_limit =  Decimal("17.025")
         self.trac = OpenTrader(symbol=symbol)
 
     @property

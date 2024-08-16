@@ -1,11 +1,11 @@
 FROM python:3-slim
 
-RUN adduser --disabled-password --gecos "" --home=/app --uid=1051 patty
-
-RUN apt update && apt install --yes --no-install-recommends \
-    entr \
-    && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /app/src /app/data
+RUN <<EOF
+adduser --disabled-password --gecos "" --home=/app patty
+apt update && apt install --yes --no-install-recommends entr
+rm -rf /var/lib/apt/lists/*
+mkdir -p /app/src /app/data /app/out
+EOF
 
 # For development only
 ENV PYTHONUNBUFFERED=1
@@ -32,6 +32,7 @@ VOLUME [ "/app/src" ]
 VOLUME [ "/app/data" ]
 VOLUME [ "/app/out" ]
 
+USER patty
 ENTRYPOINT [ "/app/entrypoint.sh" ]
 CMD ["start"]
 

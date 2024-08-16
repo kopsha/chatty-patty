@@ -71,6 +71,10 @@ class Seeker:
         await self.patty.on_start()
         await self.alpaca.on_start()
 
+        intro = self.alpaca.overview()
+        await self.patty.say("\n".join(intro))
+
+
     async def on_stop(self):
         await self.alpaca.on_stop()
         await self.patty.on_stop()
@@ -91,7 +95,7 @@ class Seeker:
         print(".", end="", flush=True)
 
         # this will attempt to buy
-        await self.alpaca.select_affordable_stocks()
+        # await self.alpaca.select_affordable_stocks()
         print(".", end="", flush=True)
 
     @error_resilient
